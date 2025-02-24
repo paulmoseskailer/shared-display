@@ -1,0 +1,11 @@
+[package]
+name = "shared_display"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+embassy-sync = "0.6.0"
+embedded-graphics = { version = "0.8.1", features = ["async_draw"]} 
+
+[patch.crates-io]
+embedded-graphics = {git = "https://github.com/paulmoseskailer/embedded-graphics.git"}
