@@ -83,8 +83,10 @@ pub async fn split_vertically<D>(
 where
     D: DrawTarget + OriginDimensions,
 {
-    let top_left = display.lock().await.bounding_box().top_left;
-    let size = display.lock().await.bounding_box().size;
+    let (top_left, size) = {
+        let bounding_box = display.lock().await.bounding_box();
+        (bounding_box.top_left, bounding_box.size)
+    };
     let split_size = Size {
         width: size.width / 2,
         height: size.height,
