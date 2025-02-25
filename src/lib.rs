@@ -1,7 +1,7 @@
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
 use embedded_graphics::{
-    draw_target::{AsyncDrawTarget, DrawTarget, DrawTargetExt},
+    draw_target::{DrawTarget, DrawTargetExt},
     geometry::{OriginDimensions, Point},
     prelude::{PixelColor, Size},
     primitives::Rectangle,
@@ -41,13 +41,13 @@ impl<D: DrawTarget + OriginDimensions> OriginDimensions for SharedDisplay<D> {
     }
 }
 
-impl<C: PixelColor, E, D: DrawTarget<Color = C, Error = E> + OriginDimensions> AsyncDrawTarget
+impl<C: PixelColor, E, D: DrawTarget<Color = C, Error = E> + OriginDimensions> DrawTarget
     for SharedDisplay<D>
 {
     type Color = C;
     type Error = E;
 
-    async fn draw_iter_async<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    async fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
@@ -57,19 +57,21 @@ impl<C: PixelColor, E, D: DrawTarget<Color = C, Error = E> + OriginDimensions> A
                 .await
                 .clipped(&self.area)
                 .draw_iter(pixels)
+                .await
         } else {
             // No way to know Self::Error, just ignore the call
             Ok(())
         }
     }
 
-    async fn clear_async(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+    async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         if let Some(display_ref) = self.display_ref.upgrade() {
             display_ref
                 .lock()
                 .await
                 .clipped(&self.area)
                 .fill_solid(&self.area, color)
+                .await
         } else {
             // No way to know Self::Error, just ignore the call
             Ok(())
