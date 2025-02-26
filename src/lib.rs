@@ -1,5 +1,5 @@
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_sync::mutex::Mutex;
+//use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+//use embassy_sync::mutex::Mutex;
 use embedded_graphics::{
     draw_target::{DrawTarget, DrawTargetExt},
     geometry::{OriginDimensions, Point},
@@ -7,30 +7,21 @@ use embedded_graphics::{
     primitives::Rectangle,
     Pixel,
 };
-use std::sync::{Arc, Weak};
+use std::boxed::Box;
+use std::sync::Mutex;
 
-pub struct SharedDisplay<D: DrawTarget + OriginDimensions> {
-    display_ref: Weak<Mutex<NoopRawMutex, D>>,
+pub struct SharedDisplay<D: DrawTarget + OriginDimensions + 'static> {
+    display_ref: &'static Mutex<Option<Box<D>>>,
     area: Rectangle,
 }
 
-pub enum DisplayAlive {
-    Yes,
-    No,
-}
-
-impl<C: PixelColor, E, D: DrawTarget<Color = C, Error = E> + OriginDimensions> SharedDisplay<D> {
-    pub fn from_rectangle(display: Weak<Mutex<NoopRawMutex, D>>, rect: Rectangle) -> Self {
+impl<C: PixelColor, E, D: DrawTarget<Color = C, Error = E> + OriginDimensions + 'static>
+    SharedDisplay<D>
+{
+    pub fn from_rectangle(display: &'static Mutex<Option<Box<D>>>, rect: Rectangle) -> Self {
         SharedDisplay {
             display_ref: display,
             area: rect,
-        }
-    }
-
-    pub fn is_alive(&self) -> DisplayAlive {
-        match self.display_ref.upgrade() {
-            Some(_) => DisplayAlive::Yes,
-            None => DisplayAlive::No,
         }
     }
 }
@@ -51,42 +42,33 @@ impl<C: PixelColor, E, D: DrawTarget<Color = C, Error = E> + OriginDimensions> D
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        if let Some(display_ref) = self.display_ref.upgrade() {
-            display_ref
-                .lock()
-                .await
-                .clipped(&self.area)
-                .draw_iter(pixels)
-                .await
-        } else {
-            // No way to know Self::Error, just ignore the call
-            Ok(())
-        }
+        let mut r = self.display_ref.lock().unwrap();
+        r.as_mut()
+            .unwrap()
+            .clipped(&self.area)
+            .draw_iter(pixels)
+            .await
     }
 
     async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        if let Some(display_ref) = self.display_ref.upgrade() {
-            display_ref
-                .lock()
-                .await
-                .clipped(&self.area)
-                .fill_solid(&self.area, color)
-                .await
-        } else {
-            // No way to know Self::Error, just ignore the call
-            Ok(())
-        }
+        let mut r = self.display_ref.lock().unwrap();
+        r.as_mut()
+            .unwrap()
+            .clipped(&self.area)
+            .fill_solid(&self.area, color)
+            .await
     }
 }
 
 pub async fn split_vertically<D>(
-    display: Arc<Mutex<NoopRawMutex, D>>,
+    display: &'static Mutex<Option<Box<D>>>,
 ) -> (SharedDisplay<D>, SharedDisplay<D>)
 where
     D: DrawTarget + OriginDimensions,
 {
     let (top_left, size) = {
-        let bounding_box = display.lock().await.bounding_box();
+        let r = display.lock().unwrap();
+        let bounding_box = r.as_ref().unwrap().bounding_box();
         (bounding_box.top_left, bounding_box.size)
     };
     let split_size = Size {
@@ -94,12 +76,9 @@ where
         height: size.height,
     };
     (
+        SharedDisplay::from_rectangle(display, Rectangle::new(top_left, split_size)),
         SharedDisplay::from_rectangle(
-            Arc::downgrade(&display),
-            Rectangle::new(top_left, split_size),
-        ),
-        SharedDisplay::from_rectangle(
-            Arc::downgrade(&display),
+            display,
             Rectangle::new(
                 Point {
                     x: top_left.x + size.width as i32 / 2,
