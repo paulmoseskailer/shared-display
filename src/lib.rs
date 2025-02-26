@@ -1,5 +1,5 @@
-//use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-//use embassy_sync::mutex::Mutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::mutex::Mutex;
 use embedded_graphics::{
     draw_target::{DrawTarget, DrawTargetExt},
     geometry::{OriginDimensions, Point},
@@ -8,17 +8,19 @@ use embedded_graphics::{
     Pixel,
 };
 use std::boxed::Box;
-use std::sync::Mutex;
 
 pub struct SharedDisplay<D: DrawTarget + OriginDimensions + 'static> {
-    display_ref: &'static Mutex<Option<Box<D>>>,
+    display_ref: &'static Mutex<CriticalSectionRawMutex, Option<Box<D>>>,
     area: Rectangle,
 }
 
 impl<C: PixelColor, E, D: DrawTarget<Color = C, Error = E> + OriginDimensions + 'static>
     SharedDisplay<D>
 {
-    pub fn from_rectangle(display: &'static Mutex<Option<Box<D>>>, rect: Rectangle) -> Self {
+    pub fn from_rectangle(
+        display: &'static Mutex<CriticalSectionRawMutex, Option<Box<D>>>,
+        rect: Rectangle,
+    ) -> Self {
         SharedDisplay {
             display_ref: display,
             area: rect,
@@ -42,33 +44,28 @@ impl<C: PixelColor, E, D: DrawTarget<Color = C, Error = E> + OriginDimensions> D
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        let mut r = self.display_ref.lock().unwrap();
-        r.as_mut()
-            .unwrap()
-            .clipped(&self.area)
-            .draw_iter(pixels)
-            .await
+        let mut guard = self.display_ref.lock().await;
+        let disp = guard.as_mut().unwrap();
+        disp.clipped(&self.area).draw_iter(pixels).await
     }
 
     async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        let mut r = self.display_ref.lock().unwrap();
-        r.as_mut()
-            .unwrap()
-            .clipped(&self.area)
-            .fill_solid(&self.area, color)
-            .await
+        let mut guard = self.display_ref.lock().await;
+        let disp = guard.as_mut().unwrap();
+        disp.clipped(&self.area).fill_solid(&self.area, color).await
     }
 }
 
 pub async fn split_vertically<D>(
-    display: &'static Mutex<Option<Box<D>>>,
+    display: &'static Mutex<CriticalSectionRawMutex, Option<Box<D>>>,
 ) -> (SharedDisplay<D>, SharedDisplay<D>)
 where
     D: DrawTarget + OriginDimensions,
 {
     let (top_left, size) = {
-        let r = display.lock().unwrap();
-        let bounding_box = r.as_ref().unwrap().bounding_box();
+        let guard = display.lock().await;
+        let disp = guard.as_ref().unwrap();
+        let bounding_box = disp.bounding_box();
         (bounding_box.top_left, bounding_box.size)
     };
     let split_size = Size {
