@@ -7,10 +7,9 @@ use embedded_graphics::{
     primitives::Rectangle,
     Pixel,
 };
-use std::boxed::Box;
 
 pub struct SharedDisplay<D: DrawTarget + OriginDimensions + 'static> {
-    display_ref: &'static Mutex<CriticalSectionRawMutex, Option<Box<D>>>,
+    display_ref: &'static Mutex<CriticalSectionRawMutex, Option<D>>,
     area: Rectangle,
 }
 
@@ -18,7 +17,7 @@ impl<C: PixelColor, E, D: DrawTarget<Color = C, Error = E> + OriginDimensions + 
     SharedDisplay<D>
 {
     pub fn from_rectangle(
-        display: &'static Mutex<CriticalSectionRawMutex, Option<Box<D>>>,
+        display: &'static Mutex<CriticalSectionRawMutex, Option<D>>,
         rect: Rectangle,
     ) -> Self {
         SharedDisplay {
@@ -57,7 +56,7 @@ impl<C: PixelColor, E, D: DrawTarget<Color = C, Error = E> + OriginDimensions> D
 }
 
 pub async fn split_vertically<D>(
-    display: &'static Mutex<CriticalSectionRawMutex, Option<Box<D>>>,
+    display: &'static Mutex<CriticalSectionRawMutex, Option<D>>,
 ) -> (SharedDisplay<D>, SharedDisplay<D>)
 where
     D: DrawTarget + OriginDimensions,
