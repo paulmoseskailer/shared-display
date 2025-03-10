@@ -9,3 +9,4 @@ embedded-graphics = { version = "0.8.1", default-features = false, features = ["
 
 [patch.crates-io]
 embedded-graphics = {git = "https://github.com/paulmoseskailer/embedded-graphics.git"}
+embedded-graphics-core = { git = "https://github.com/paulmoseskailer/embedded-graphics.git" }
