@@ -52,9 +52,6 @@ where
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        pixels.into_iter().for_each(|p| {
-            let _ = D::set_pixel(self, p);
-        });
-        Ok(())
+        pixels.into_iter().try_for_each(|p| D::set_pixel(self, p))
     }
 }
