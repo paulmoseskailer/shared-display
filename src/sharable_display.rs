@@ -1,56 +1,60 @@
 use embedded_graphics::{
     draw_target::DrawTarget,
-    pixelcolor::PixelColor,
     prelude::{OriginDimensions, Size},
     Pixel,
 };
 
-pub struct DisplayPartition<'a, D: ?Sized, C, E> {
+pub struct DisplayPartition<'a, D: ?Sized> {
     pub buffer: &'a mut [u8],
-    parent: &'a D,
-    _color: core::marker::PhantomData<C>,
-    _error: core::marker::PhantomData<E>,
+    _display: core::marker::PhantomData<D>,
+}
+
+impl<D> DisplayPartition<'_, D>
+where
+    D: SharableBufferedDisplay,
+{
+    pub fn new(buffer: &mut [u8]) -> DisplayPartition<D> {
+        DisplayPartition {
+            buffer,
+            _display: core::marker::PhantomData,
+        }
+    }
 }
 
 pub trait SharableBufferedDisplay: DrawTarget {
     fn split_display_buffer(
-        &mut self, /* add option to split vertically here */
-    ) -> (
-        DisplayPartition<Self, Self::Color, Self::Error>,
-        DisplayPartition<Self, Self::Color, Self::Error>,
-    );
+        &mut self, /* add option to split vertically here later */
+    ) -> (DisplayPartition<Self>, DisplayPartition<Self>);
 
-    async fn draw_iter_to_buffer<I>(
-        &self,
-        partition: &mut DisplayPartition<Self, Self::Color, Self::Error>,
-        pixels: I,
-    ) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Pixel<Self::Color>>;
+    fn set_pixel(
+        partition: &mut DisplayPartition<Self>,
+        pixel: Pixel<Self::Color>,
+    ) -> Result<(), Self::Error>;
 }
 
-impl<D, C, E> OriginDimensions for DisplayPartition<'_, D, C, E>
+impl<D> OriginDimensions for DisplayPartition<'_, D>
 where
-    D: SharableBufferedDisplay<Color = C, Error = E>,
-    C: PixelColor,
+    D: SharableBufferedDisplay,
 {
     fn size(&self) -> Size {
         Size::new(0, 0)
     }
 }
 
-impl<D, C, E> DrawTarget for DisplayPartition<'_, D, C, E>
+impl<D> DrawTarget for DisplayPartition<'_, D>
 where
-    D: SharableBufferedDisplay<Color = C, Error = E>,
-    C: PixelColor,
+    D: SharableBufferedDisplay,
 {
-    type Color = C;
-    type Error = E;
+    type Color = D::Color;
+    type Error = D::Error;
 
-    async fn draw_iter<I>(&mut self, pixels: I) -> Result<(), E>
+    async fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        self.parent.draw_iter_to_buffer(self, pixels).await
+        pixels.into_iter().for_each(|p| {
+            let _ = D::set_pixel(self, p);
+        });
+        Ok(())
     }
 }
