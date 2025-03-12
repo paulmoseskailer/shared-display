@@ -1,49 +1,73 @@
 use embedded_graphics::{
     draw_target::DrawTarget,
+    geometry::Point,
     prelude::{OriginDimensions, Size},
+    primitives::Rectangle,
     Pixel,
 };
 
-pub struct DisplayPartition<'a, D: ?Sized> {
-    pub buffer: &'a mut [u8],
-    _display: core::marker::PhantomData<D>,
+pub struct DisplayPartition<Display: ?Sized, BufferType: Sized> {
+    pub buffer: *mut BufferType,
+    pub partition: Rectangle,
+    _display: core::marker::PhantomData<Display>,
 }
 
-impl<D> DisplayPartition<'_, D>
+impl<D, BufferType> DisplayPartition<D, BufferType>
 where
     D: SharableBufferedDisplay,
+    BufferType: Sized,
 {
-    pub fn new(buffer: &mut [u8]) -> DisplayPartition<D> {
+    pub fn new(buffer: &mut [BufferType], partition: Rectangle) -> DisplayPartition<D, BufferType> {
         DisplayPartition {
-            buffer,
+            buffer: buffer.as_mut_ptr(),
+            partition,
             _display: core::marker::PhantomData,
+        }
+    }
+
+    fn contains(&self, p: Point) -> bool {
+        self.partition.contains(p)
+    }
+
+    fn set_pixel_checked(&mut self, dest: Point, value: BufferType) {
+        if self.contains(dest) {
+            // TODO this two should equal the number of partitions
+            let offset: usize = (dest.x + self.partition.size.width as i32 * 2 * dest.y)
+                .try_into()
+                .unwrap();
+            unsafe {
+                *self.buffer.add(offset) = value;
+            }
         }
     }
 }
 
 pub trait SharableBufferedDisplay: DrawTarget {
+    type BufferType;
+
     fn split_display_buffer(
         &mut self, /* add option to split vertically here later */
-    ) -> (DisplayPartition<Self>, DisplayPartition<Self>);
+    ) -> (
+        DisplayPartition<Self, Self::BufferType>,
+        DisplayPartition<Self, Self::BufferType>,
+    );
 
-    fn set_pixel(
-        partition: &mut DisplayPartition<Self>,
-        pixel: Pixel<Self::Color>,
-    ) -> Result<(), Self::Error>;
+    /// What value should be written into the buffer at the pixel's position?
+    fn get_pixel_value(pixel: Pixel<Self::Color>) -> Self::BufferType;
 }
 
-impl<D> OriginDimensions for DisplayPartition<'_, D>
+impl<D, B> OriginDimensions for DisplayPartition<D, B>
 where
     D: SharableBufferedDisplay,
 {
     fn size(&self) -> Size {
-        Size::new(0, 0)
+        self.partition.size
     }
 }
 
-impl<D> DrawTarget for DisplayPartition<'_, D>
+impl<D, B> DrawTarget for DisplayPartition<D, B>
 where
-    D: SharableBufferedDisplay,
+    D: SharableBufferedDisplay<BufferType = B>,
 {
     type Color = D::Color;
     type Error = D::Error;
@@ -52,6 +76,9 @@ where
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        pixels.into_iter().try_for_each(|p| D::set_pixel(self, p))
+        pixels.into_iter().try_for_each(|p| {
+            self.set_pixel_checked(p.0, D::get_pixel_value(p));
+            Ok(())
+        })
     }
 }
