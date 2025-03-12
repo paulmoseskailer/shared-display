@@ -6,6 +6,7 @@ use embedded_graphics::{
 use shared_display::sharable_display::{DisplayPartition, SharableBufferedDisplay};
 
 const NUM_PIXELS: usize = 8;
+const PRINT_FLUSH: bool = false;
 
 /// Assumes width of 4 pixels
 struct FakeDisplay {
@@ -20,15 +21,17 @@ impl FakeDisplay {
 
     fn flush(&mut self) -> &[u8; NUM_PIXELS] {
         let num_rows = (NUM_PIXELS as u32).div_ceil(4);
-        for row in 0..num_rows {
-            let offset: usize = (row * 4).try_into().unwrap();
-            println!(
-                "{}{}{}{}",
-                self.buffer[offset + 0],
-                self.buffer[offset + 1],
-                self.buffer[offset + 2],
-                self.buffer[offset + 3]
-            );
+        if PRINT_FLUSH {
+            for row in 0..num_rows {
+                let offset: usize = (row * 4).try_into().unwrap();
+                println!(
+                    "{}{}{}{}",
+                    self.buffer[offset + 0],
+                    self.buffer[offset + 1],
+                    self.buffer[offset + 2],
+                    self.buffer[offset + 3]
+                );
+            }
         }
         &self.buffer
     }

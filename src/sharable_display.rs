@@ -1,7 +1,7 @@
 use embedded_graphics::{
     draw_target::DrawTarget,
     geometry::Point,
-    prelude::{OriginDimensions, Size},
+    prelude::{Dimensions, OriginDimensions, Size},
     primitives::Rectangle,
     Pixel,
 };
@@ -80,5 +80,11 @@ where
             self.set_pixel_checked(p.0, D::get_pixel_value(p));
             Ok(())
         })
+    }
+
+    // Make sure to clear the partition. The default clear method uses self.bounding_box()
+    // which assumes the display has top_left (0,0)
+    async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        self.fill_solid(&self.partition.clone(), color).await
     }
 }
