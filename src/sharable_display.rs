@@ -17,7 +17,7 @@ pub struct DisplayPartition<B, D: ?Sized> {
 impl<C, B, D> DisplayPartition<B, D>
 where
     C: PixelColor,
-    D: SharableBufferedDisplay<BufferType = B, Color = C>,
+    D: SharableBufferedDisplay<BufferElement = B, Color = C>,
 {
     pub fn new(
         buffer: &mut [B],
@@ -48,23 +48,23 @@ where
 }
 
 pub trait SharableBufferedDisplay: DrawTarget {
-    type BufferType;
+    type BufferElement;
 
     fn split_display_buffer(
         &mut self, /* add option to split vertically here later */
     ) -> (
-        DisplayPartition<Self::BufferType, Self>,
-        DisplayPartition<Self::BufferType, Self>,
+        DisplayPartition<Self::BufferElement, Self>,
+        DisplayPartition<Self::BufferElement, Self>,
     );
 
     fn get_buffer_offset(pixel: Pixel<Self::Color>, display_width: usize) -> usize;
 
-    fn set_pixel(buffer: &mut Self::BufferType, pixel: Pixel<Self::Color>);
+    fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>);
 }
 
 impl<B, D> OriginDimensions for DisplayPartition<B, D>
 where
-    D: SharableBufferedDisplay<BufferType = B>,
+    D: SharableBufferedDisplay<BufferElement = B>,
 {
     fn size(&self) -> Size {
         self.partition.size
@@ -73,7 +73,7 @@ where
 
 impl<B, D> DrawTarget for DisplayPartition<B, D>
 where
-    D: SharableBufferedDisplay<BufferType = B>,
+    D: SharableBufferedDisplay<BufferElement = B>,
 {
     type Color = D::Color;
     type Error = D::Error;
