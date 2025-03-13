@@ -8,8 +8,8 @@ use embedded_graphics::{
 
 pub struct DisplayPartition<B, D: ?Sized> {
     pub buffer: *mut B,
-    pub display_width: usize,
     buffer_len: usize,
+    pub display_width: usize,
     pub partition: Rectangle,
     _display: core::marker::PhantomData<D>,
 }
@@ -85,12 +85,15 @@ where
         let whole_buffer: &mut [B] =
             // Safety: we check that every index is within our owned slice
             unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) };
-        pixels.into_iter().for_each(|p| {
-            let index = D::get_buffer_offset(p, self.display_width);
-            if self.owns_index(index) {
-                D::set_pixel(&mut whole_buffer[index], p);
-            }
-        });
+        pixels
+            .into_iter()
+            .map(|pixel| Pixel(pixel.0 + self.partition.top_left, pixel.1))
+            .for_each(|p| {
+                let index = D::get_buffer_offset(p, self.display_width);
+                if self.owns_index(index) {
+                    D::set_pixel(&mut whole_buffer[index], p);
+                }
+            });
         Ok(())
     }
 
