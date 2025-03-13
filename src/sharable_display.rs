@@ -82,18 +82,16 @@ where
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        pixels.into_iter().try_for_each(|p| {
+        let whole_buffer: &mut [B] =
+            // Safety: we check that every index is within our owned slice
+            unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) };
+        pixels.into_iter().for_each(|p| {
             let index = D::get_buffer_offset(p, self.display_width);
             if self.owns_index(index) {
-                // Safety: we checked that index is within our owned slice
-                unsafe {
-                    let whole_buffer: &mut [B] =
-                        core::slice::from_raw_parts_mut(self.buffer, self.buffer_len);
-                    D::set_pixel(&mut whole_buffer[index], p);
-                }
+                D::set_pixel(&mut whole_buffer[index], p);
             }
-            Ok(())
-        })
+        });
+        Ok(())
     }
 
     // Make sure to clear the partition. The default clear method uses self.bounding_box()
@@ -103,3 +101,5 @@ where
         self.fill_solid(&self.partition.clone(), color).await
     }
 }
+
+// TODO impl SharableBufferedDisplay for DisplayPartition
