@@ -97,11 +97,14 @@ where
         Ok(())
     }
 
-    // Make sure to clear the partition. The default clear method uses self.bounding_box()
-    // which assumes the display has top_left (0,0)
+    // Make sure to remove the offset from the Rectangle to be cleared,
+    // draw_iter adds it again
     async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        // TODO can we avoid this clone?
-        self.fill_solid(&self.partition.clone(), color).await
+        self.fill_solid(
+            &(Rectangle::new(Point::new(0, 0), self.partition.size)),
+            color,
+        )
+        .await
     }
 }
 
