@@ -63,12 +63,15 @@ pub trait SharableBufferedDisplay: DrawTarget {
         DisplayPartition<Self::BufferElement, Self>,
     ) {
         let parent_size = self.bounding_box().size;
-        let half_width = (parent_size.width / 2).into();
-        let left_partition =
-            Rectangle::new(Point::new(0, 0), Size::new(half_width, parent_size.height));
+        // ensure no bytes are split in half by rounding to a split of width multiple of 8
+        let left_partition_width = (parent_size.width / 2) & !7;
+        let left_partition = Rectangle::new(
+            Point::new(0, 0),
+            Size::new(left_partition_width, parent_size.height),
+        );
         let right_partition = Rectangle::new(
-            Point::new(half_width.try_into().unwrap(), 0),
-            Size::new(half_width, parent_size.height),
+            Point::new(left_partition_width.try_into().unwrap(), 0),
+            Size::new(parent_size.width - left_partition_width, parent_size.height),
         );
         (
             DisplayPartition::new(
