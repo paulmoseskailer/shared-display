@@ -17,7 +17,7 @@ pub struct DisplayPartition<B, D: ?Sized> {
 impl<C, B, D> DisplayPartition<B, D>
 where
     C: PixelColor,
-    D: SharableBufferedDisplay<BufferElement = B, Color = C>,
+    D: SharableBufferedDisplay<BufferElement = B, Color = C> + ?Sized,
 {
     pub fn new(
         buffer: &mut [B],
@@ -50,16 +50,39 @@ where
 pub trait SharableBufferedDisplay: DrawTarget {
     type BufferElement;
 
-    fn split_display_buffer(
+    fn get_buffer(&mut self) -> &mut [Self::BufferElement];
+
+    fn calculate_buffer_index(point: Point, display_width: usize) -> usize;
+
+    fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>);
+
+    fn split_buffer_vertically(
         &mut self, /* add option to split vertically here later */
     ) -> (
         DisplayPartition<Self::BufferElement, Self>,
         DisplayPartition<Self::BufferElement, Self>,
-    );
-
-    fn get_buffer_offset(pixel: Pixel<Self::Color>, display_width: usize) -> usize;
-
-    fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>);
+    ) {
+        let parent_size = self.bounding_box().size;
+        let half_width = (parent_size.width / 2).into();
+        let left_partition =
+            Rectangle::new(Point::new(0, 0), Size::new(half_width, parent_size.height));
+        let right_partition = Rectangle::new(
+            Point::new(half_width.try_into().unwrap(), 0),
+            Size::new(half_width, parent_size.height),
+        );
+        (
+            DisplayPartition::new(
+                self.get_buffer(),
+                parent_size.width as usize,
+                left_partition,
+            ),
+            DisplayPartition::new(
+                self.get_buffer(),
+                parent_size.width as usize,
+                right_partition,
+            ),
+        )
+    }
 }
 
 impl<B, D> OriginDimensions for DisplayPartition<B, D>
@@ -89,7 +112,7 @@ where
             .into_iter()
             .map(|pixel| Pixel(pixel.0 + self.partition.top_left, pixel.1))
             .for_each(|p| {
-                let index = D::get_buffer_offset(p, self.display_width);
+                let index = D::calculate_buffer_index(p.0, self.display_width);
                 if self.owns_index(index) {
                     D::set_pixel(&mut whole_buffer[index], p);
                 }
