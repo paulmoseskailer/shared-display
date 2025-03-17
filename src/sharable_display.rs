@@ -39,11 +39,11 @@ where
 
     fn owns_index(&self, index: usize) -> bool {
         let i: u32 = index.try_into().unwrap();
-        let screen_width = 2 * self.partition.size.width;
-        let x = i % screen_width;
+        let x: i32 = (i as usize % self.display_width).try_into().unwrap();
+        let y: i32 = (i as usize / self.display_width).try_into().unwrap();
         // check if the x-coordinate of the index is within the owned partition
         // TODO adapt
-        self.contains(Point::new(x.try_into().unwrap(), 0))
+        self.contains(Point::new(x, y))
     }
 }
 
@@ -57,14 +57,19 @@ pub trait SharableBufferedDisplay: DrawTarget {
     fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>);
 
     fn split_buffer_vertically(
-        &mut self, /* add option to split vertically here later */
+        &mut self,
     ) -> (
         DisplayPartition<Self::BufferElement, Self>,
         DisplayPartition<Self::BufferElement, Self>,
     ) {
         let parent_size = self.bounding_box().size;
+        assert!(
+            parent_size.width > 8,
+            "Error: can't split a display that's only 8 pixels wide"
+        );
+
         // ensure no bytes are split in half by rounding to a split of width multiple of 8
-        let left_partition_width = (parent_size.width / 2) & !7;
+        let left_partition_width = (parent_size.width / 2) + 7 & !7;
         let left_partition = Rectangle::new(
             Point::new(0, 0),
             Size::new(left_partition_width, parent_size.height),
