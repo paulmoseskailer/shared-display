@@ -36,19 +36,6 @@ where
     fn contains(&self, p: Point) -> bool {
         self.partition.contains(p)
     }
-
-    fn owns_buffer_index(&self, buffer_index: usize) -> bool {
-        let pixels_per_buffer_element =
-            (self.parent_size.width * self.parent_size.height) as usize / self.buffer_len;
-        let pixel_index = buffer_index * pixels_per_buffer_element;
-        let pixel_x = pixel_index % self.parent_size.width as usize;
-        let pixel_y = pixel_index % self.parent_size.height as usize;
-
-        self.contains(Point::new(
-            pixel_x.try_into().unwrap(),
-            pixel_y.try_into().unwrap(),
-        ))
-    }
 }
 
 pub trait SharableBufferedDisplay: DrawTarget {
@@ -128,7 +115,7 @@ where
             .map(|pixel| Pixel(pixel.0 + self.partition.top_left, pixel.1))
             .for_each(|p| {
                 let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
-                if self.owns_buffer_index(buffer_index) {
+                if self.contains(p.0) {
                     D::set_pixel(&mut whole_buffer[buffer_index], p);
                 }
             });
