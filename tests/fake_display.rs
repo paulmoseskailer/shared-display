@@ -20,10 +20,6 @@ struct FakeDisplay {
 }
 
 impl FakeDisplay {
-    fn new(buffer: [u8; NUM_PIXELS]) -> Self {
-        FakeDisplay { buffer }
-    }
-
     fn flush(&mut self) -> &[u8; NUM_PIXELS] {
         if PRINT_FLUSH {
             for row in 0..DISP_HEIGHT {
@@ -73,8 +69,8 @@ impl SharableBufferedDisplay for FakeDisplay {
     fn get_buffer(&mut self) -> &mut [Self::BufferElement] {
         self.buffer.as_mut()
     }
-    fn calculate_buffer_index(point: Point, display_width: usize) -> usize {
-        (point.y * display_width as i32 + point.x)
+    fn calculate_buffer_index(point: Point, parent_size: Size) -> usize {
+        (point.y * parent_size.width as i32 + point.x)
             .try_into()
             .unwrap()
     }
@@ -89,7 +85,7 @@ impl SharableBufferedDisplay for FakeDisplay {
 #[tokio::test]
 async fn simple_split_clear() -> Result<(), Infallible> {
     let buffer = [0; NUM_PIXELS];
-    let mut d = FakeDisplay::new(buffer);
+    let mut d = FakeDisplay { buffer };
     assert_eq!(*d.flush(), [0; NUM_PIXELS]);
 
     d.clear(BinaryColor::On).await?;
@@ -114,7 +110,7 @@ async fn simple_split_clear() -> Result<(), Infallible> {
 #[tokio::test]
 async fn simple_split_draw_iter() -> Result<(), Infallible> {
     let buffer = [0; NUM_PIXELS];
-    let mut d = FakeDisplay::new(buffer);
+    let mut d = FakeDisplay { buffer };
     assert_eq!(*d.flush(), [0; NUM_PIXELS]);
 
     let (mut left_display, mut right_display) = d.split_buffer_vertically();

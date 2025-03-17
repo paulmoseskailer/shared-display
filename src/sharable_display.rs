@@ -9,7 +9,7 @@ use embedded_graphics::{
 pub struct DisplayPartition<B, D: ?Sized> {
     pub buffer: *mut B,
     buffer_len: usize,
-    pub display_width: usize,
+    pub parent_size: Size,
     pub partition: Rectangle,
     _display: core::marker::PhantomData<D>,
 }
@@ -21,12 +21,12 @@ where
 {
     pub fn new(
         buffer: &mut [B],
-        display_width: usize,
+        parent_size: Size,
         partition: Rectangle,
     ) -> DisplayPartition<B, D> {
         DisplayPartition {
             buffer: buffer.as_mut_ptr(),
-            display_width,
+            parent_size,
             buffer_len: buffer.len(),
             partition,
             _display: core::marker::PhantomData,
@@ -37,13 +37,17 @@ where
         self.partition.contains(p)
     }
 
-    fn owns_index(&self, index: usize) -> bool {
-        let i: u32 = index.try_into().unwrap();
-        let x: i32 = (i as usize % self.display_width).try_into().unwrap();
-        let y: i32 = (i as usize / self.display_width).try_into().unwrap();
-        // check if the x-coordinate of the index is within the owned partition
-        // TODO adapt
-        self.contains(Point::new(x, y))
+    fn owns_buffer_index(&self, buffer_index: usize) -> bool {
+        let pixels_per_buffer_element =
+            (self.parent_size.width * self.parent_size.height) as usize / self.buffer_len;
+        let pixel_index = buffer_index * pixels_per_buffer_element;
+        let pixel_x = pixel_index % self.parent_size.width as usize;
+        let pixel_y = pixel_index % self.parent_size.height as usize;
+
+        self.contains(Point::new(
+            pixel_x.try_into().unwrap(),
+            pixel_y.try_into().unwrap(),
+        ))
     }
 }
 
@@ -52,7 +56,7 @@ pub trait SharableBufferedDisplay: DrawTarget {
 
     fn get_buffer(&mut self) -> &mut [Self::BufferElement];
 
-    fn calculate_buffer_index(point: Point, display_width: usize) -> usize;
+    fn calculate_buffer_index(point: Point, parent_size: Size) -> usize;
 
     fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>);
 
@@ -68,6 +72,17 @@ pub trait SharableBufferedDisplay: DrawTarget {
             "Error: can't split a display that's only 8 pixels wide"
         );
 
+        let buffer_len = self.get_buffer().len();
+        let pixels_per_buffer_el = (parent_size.width * parent_size.height) as usize / buffer_len;
+        if pixels_per_buffer_el > 1 {
+            assert_eq!(
+                parent_size.width % pixels_per_buffer_el as u32,
+                0,
+                "A buffer element would have to span multiple rows! Have {} pixels per buffer element and display width {} pixels. Adjust screen size or buffer element type!",
+                pixels_per_buffer_el, parent_size.width
+            );
+        }
+
         // ensure no bytes are split in half by rounding to a split of width multiple of 8
         let left_partition_width = (parent_size.width / 2) + 7 & !7;
         let left_partition = Rectangle::new(
@@ -79,16 +94,8 @@ pub trait SharableBufferedDisplay: DrawTarget {
             Size::new(parent_size.width - left_partition_width, parent_size.height),
         );
         (
-            DisplayPartition::new(
-                self.get_buffer(),
-                parent_size.width as usize,
-                left_partition,
-            ),
-            DisplayPartition::new(
-                self.get_buffer(),
-                parent_size.width as usize,
-                right_partition,
-            ),
+            DisplayPartition::new(self.get_buffer(), parent_size, left_partition),
+            DisplayPartition::new(self.get_buffer(), parent_size, right_partition),
         )
     }
 }
@@ -120,9 +127,9 @@ where
             .into_iter()
             .map(|pixel| Pixel(pixel.0 + self.partition.top_left, pixel.1))
             .for_each(|p| {
-                let index = D::calculate_buffer_index(p.0, self.display_width);
-                if self.owns_index(index) {
-                    D::set_pixel(&mut whole_buffer[index], p);
+                let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
+                if self.owns_buffer_index(buffer_index) {
+                    D::set_pixel(&mut whole_buffer[buffer_index], p);
                 }
             });
         Ok(())
