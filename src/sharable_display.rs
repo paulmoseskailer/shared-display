@@ -1,7 +1,7 @@
 use embedded_graphics::{
     draw_target::DrawTarget,
     geometry::Point,
-    prelude::{OriginDimensions, PixelColor, Size},
+    prelude::{Dimensions, OriginDimensions, PixelColor, Size},
     primitives::Rectangle,
     Pixel,
 };
@@ -73,11 +73,11 @@ pub trait SharableBufferedDisplay: DrawTarget {
         // ensure no bytes are split in half by rounding to a split of width multiple of 8
         let left_partition_width = (parent_size.width / 2) + 7 & !7;
         let left_partition = Rectangle::new(
-            Point::new(0, 0),
+            self.bounding_box().top_left,
             Size::new(left_partition_width, parent_size.height),
         );
         let right_partition = Rectangle::new(
-            Point::new(left_partition_width.try_into().unwrap(), 0),
+            self.bounding_box().top_left + Point::new(left_partition_width.try_into().unwrap(), 0),
             Size::new(parent_size.width - left_partition_width, parent_size.height),
         );
         (
@@ -87,12 +87,12 @@ pub trait SharableBufferedDisplay: DrawTarget {
     }
 }
 
-impl<B, D> OriginDimensions for DisplayPartition<B, D>
+impl<B, D> Dimensions for DisplayPartition<B, D>
 where
     D: SharableBufferedDisplay<BufferElement = B>,
 {
-    fn size(&self) -> Size {
-        self.partition.size
+    fn bounding_box(&self) -> Rectangle {
+        self.partition
     }
 }
 
@@ -133,4 +133,20 @@ where
     }
 }
 
-// TODO impl SharableBufferedDisplay for DisplayPartition
+impl<B, D> SharableBufferedDisplay for DisplayPartition<B, D>
+where
+    D: SharableBufferedDisplay<BufferElement = B>,
+{
+    type BufferElement = B;
+    fn get_buffer(&mut self) -> &mut [Self::BufferElement] {
+        unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) }
+    }
+
+    fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>) {
+        D::set_pixel(buffer, pixel)
+    }
+
+    fn calculate_buffer_index(point: Point, parent_size: Size) -> usize {
+        D::calculate_buffer_index(point, parent_size)
+    }
+}
