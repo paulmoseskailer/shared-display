@@ -38,6 +38,15 @@ where
     }
 }
 
+impl<B, D> Dimensions for DisplayPartition<B, D>
+where
+    D: SharableBufferedDisplay<BufferElement = B>,
+{
+    fn bounding_box(&self) -> Rectangle {
+        self.partition
+    }
+}
+
 pub trait SharableBufferedDisplay: DrawTarget {
     type BufferElement;
 
@@ -84,15 +93,6 @@ pub trait SharableBufferedDisplay: DrawTarget {
             DisplayPartition::new(self.get_buffer(), parent_size, left_partition),
             DisplayPartition::new(self.get_buffer(), parent_size, right_partition),
         )
-    }
-}
-
-impl<B, D> Dimensions for DisplayPartition<B, D>
-where
-    D: SharableBufferedDisplay<BufferElement = B>,
-{
-    fn bounding_box(&self) -> Rectangle {
-        self.partition
     }
 }
 
@@ -148,5 +148,45 @@ where
 
     fn calculate_buffer_index(point: Point, parent_size: Size) -> usize {
         D::calculate_buffer_index(point, parent_size)
+    }
+    // override to correctly set parent_size
+    fn split_buffer_vertically(
+        &mut self,
+    ) -> (
+        DisplayPartition<Self::BufferElement, Self>,
+        DisplayPartition<Self::BufferElement, Self>,
+    ) {
+        let parent_size = self.bounding_box().size;
+        assert!(
+            parent_size.width > 8,
+            "Error: can't split a display that's only 8 pixels wide"
+        );
+
+        let pixels_per_buffer_el =
+            (parent_size.width * parent_size.height) as usize / self.buffer_len;
+        if pixels_per_buffer_el > 1 {
+            assert_eq!(
+                parent_size.width % pixels_per_buffer_el as u32,
+                0,
+                "A buffer element would have to span multiple rows! Have {} pixels per buffer element and display width {} pixels. Adjust screen size or buffer element type!",
+                pixels_per_buffer_el, parent_size.width
+            );
+        }
+
+        // ensure no bytes are split in half by rounding to a split of width multiple of 8
+        let left_partition_width = (parent_size.width / 2) + 7 & !7;
+        let left_partition = Rectangle::new(
+            self.bounding_box().top_left,
+            Size::new(left_partition_width, parent_size.height),
+        );
+        let right_partition = Rectangle::new(
+            self.bounding_box().top_left + Point::new(left_partition_width.try_into().unwrap(), 0),
+            Size::new(parent_size.width - left_partition_width, parent_size.height),
+        );
+        let original_display_size = self.parent_size;
+        (
+            DisplayPartition::new(self.get_buffer(), original_display_size, left_partition),
+            DisplayPartition::new(self.get_buffer(), original_display_size, right_partition),
+        )
     }
 }
