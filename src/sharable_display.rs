@@ -1,7 +1,7 @@
 use embedded_graphics::{
     draw_target::DrawTarget,
     geometry::Point,
-    prelude::{Dimensions, OriginDimensions, PixelColor, Size},
+    prelude::{Dimensions, PixelColor, Size},
     primitives::Rectangle,
     Pixel,
 };
@@ -93,6 +93,32 @@ pub trait SharableBufferedDisplay: DrawTarget {
             DisplayPartition::new(self.get_buffer(), parent_size, left_partition),
             DisplayPartition::new(self.get_buffer(), parent_size, right_partition),
         )
+    }
+
+    fn new_partition(&mut self, area: Rectangle) -> DisplayPartition<Self::BufferElement, Self> {
+        let parent_size = self.bounding_box().size;
+        assert!(
+            parent_size.width > 8,
+            "Error: can't take a partition from a display that's only 8 pixels wide"
+        );
+
+        let buffer_len = self.get_buffer().len();
+        let pixels_per_buffer_el = (parent_size.width * parent_size.height) as usize / buffer_len;
+        if pixels_per_buffer_el > 1 {
+            assert_eq!(
+                parent_size.width % pixels_per_buffer_el as u32,
+                0,
+                "A buffer element would have to span multiple rows! Have {} pixels per buffer element and display width {} pixels. Adjust screen size or buffer element type!",
+                pixels_per_buffer_el, parent_size.width
+            );
+        }
+
+        assert_eq!(
+            area.size.width % 8,
+            0,
+            "Error: partition widths need to be multiples of 8!"
+        );
+        DisplayPartition::new(self.get_buffer(), parent_size, area)
     }
 }
 
