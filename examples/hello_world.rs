@@ -92,20 +92,17 @@ async fn main(spawner: Spawner) {
     let mut shared_display: SharedDisplay = SharedDisplay::new().await;
 
     let right_rect = Rectangle::new(Point::new(64, 0), Size::new(64, 64));
-    if let Some(right_display) = shared_display.new_partition(&mut display, right_rect).await {
-        // TODO this should be the toolkit assign_app!
-        spawner.must_spawn(draw_line(right_display));
-    } else {
-        println!("creating new partition failed!");
-    }
+    let right_display = shared_display
+        .new_partition(&mut display, right_rect)
+        .unwrap();
+    // TODO this should be the toolkit assign_app!
+    spawner.must_spawn(draw_line(right_display));
 
     let left_rect = Rectangle::new(Point::new(0, 0), Size::new(64, 64));
-    if let Some(left_display) = shared_display.new_partition(&mut display, left_rect).await {
-        // TODO this should be the toolkit assign_app!
-        spawner.must_spawn(print_hello(left_display));
-    } else {
-        println!("creating new partition failed!");
-    }
+    let left_display = shared_display
+        .new_partition(&mut display, left_rect)
+        .unwrap();
+    spawner.must_spawn(print_hello(left_display));
 
     spawner.must_spawn(flush_simulator_display(display, window));
 }

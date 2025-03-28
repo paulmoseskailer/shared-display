@@ -1,22 +1,22 @@
-use embedded_graphics::{prelude::*, primitives::Rectangle};
+use embedded_graphics::{geometry::Size, primitives::Rectangle};
 
 use crate::sharable_display::{DisplayPartition, SharableBufferedDisplay};
 
 const MAX_PARTITIONS: usize = 4;
 
 pub struct SharedDisplay {
-    partitions: heapless::Vec<(Rectangle, usize, usize), MAX_PARTITIONS>,
+    // keep track of area and dirty area
+    partitions: heapless::Vec<(Rectangle, Rectangle), MAX_PARTITIONS>,
 }
 
 impl SharedDisplay {
     pub async fn new() -> Self {
-        println!("new called!, max partitions {}", MAX_PARTITIONS);
         SharedDisplay {
             partitions: heapless::Vec::new(),
         }
     }
 
-    pub async fn new_partition<B, D>(
+    pub fn new_partition<B, D>(
         &mut self,
         display: &mut D,
         area: Rectangle,
@@ -24,6 +24,7 @@ impl SharedDisplay {
     where
         D: SharableBufferedDisplay<BufferElement = B>,
     {
+        // check area inside display
         let bb = display.bounding_box();
         if !(bb.contains(area.top_left)
             && bb.contains(area.bottom_right().unwrap_or(area.top_left)))
@@ -31,9 +32,16 @@ impl SharedDisplay {
             return None;
         }
 
-        //TODO check no overlap with other partitions
+        // check area not overlapping with existing partitions
+        for p in self.partitions.iter() {
+            if p.0.intersection(&area).size != Size::new(0, 0) {
+                return None;
+            }
+        }
 
-        self.partitions.push((area.clone(), 0, 0)).unwrap();
+        self.partitions
+            .push((area.clone(), Rectangle::new(area.top_left, Size::new(0, 0))))
+            .unwrap();
 
         Some(display.new_partition(area))
     }
