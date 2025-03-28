@@ -1,42 +1,40 @@
-use std::borrow::BorrowMut;
-
-use embedded_graphics::primitives::Rectangle;
+use embedded_graphics::{prelude::*, primitives::Rectangle};
 
 use crate::sharable_display::{DisplayPartition, SharableBufferedDisplay};
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 
-pub struct SharedDisplay<B, D, const MAX_PARTITIONS: usize>
-where
-    D: SharableBufferedDisplay,
-{
-    partitions: heapless::Vec<DisplayPartition<B, D>, MAX_PARTITIONS>,
+const MAX_PARTITIONS: usize = 4;
+
+pub struct SharedDisplay {
+    partitions: heapless::Vec<(Rectangle, usize, usize), MAX_PARTITIONS>,
 }
 
-impl<B, D, const MAX_PARTITIONS: usize> SharedDisplay<B, D, MAX_PARTITIONS>
-where
-    D: SharableBufferedDisplay,
-{
-    // Save area and dirty section for every partition
-    const PARTITIONS: Mutex<
-        CriticalSectionRawMutex,
-        heapless::Vec<(Rectangle, u8, u8), MAX_PARTITIONS>,
-    > = Mutex::new(heapless::Vec::new());
-
-    pub async fn init() {
-        println!("init called!, max partitions {}", MAX_PARTITIONS);
+impl SharedDisplay {
+    pub async fn new() -> Self {
+        println!("new called!, max partitions {}", MAX_PARTITIONS);
+        SharedDisplay {
+            partitions: heapless::Vec::new(),
+        }
     }
 
-    pub async fn new_partition(display: &mut D, area: Rectangle) -> Option<DisplayPartition<B, D>>
+    pub async fn new_partition<B, D>(
+        &mut self,
+        display: &mut D,
+        area: Rectangle,
+    ) -> Option<DisplayPartition<B, D>>
     where
         D: SharableBufferedDisplay<BufferElement = B>,
     {
-        //TODO check no overlap
-        Self::PARTITIONS
-            .lock()
-            .await
-            .borrow_mut()
-            .push((area, 0, 0))
-            .unwrap();
+        let bb = display.bounding_box();
+        if !(bb.contains(area.top_left)
+            && bb.contains(area.bottom_right().unwrap_or(area.top_left)))
+        {
+            return None;
+        }
+
+        //TODO check no overlap with other partitions
+
+        self.partitions.push((area.clone(), 0, 0)).unwrap();
+
         Some(display.new_partition(area))
     }
 }

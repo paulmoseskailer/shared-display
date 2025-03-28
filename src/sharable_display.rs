@@ -139,6 +139,7 @@ where
         pixels
             .into_iter()
             .map(|pixel| Pixel(pixel.0 + self.partition.top_left, pixel.1))
+            .filter(|Pixel(pos, _color)| self.contains(*pos))
             .for_each(|p| {
                 let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
                 if self.contains(p.0) {
