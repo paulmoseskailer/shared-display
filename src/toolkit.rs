@@ -5,8 +5,8 @@ use crate::sharable_display::{DisplayPartition, SharableBufferedDisplay};
 const MAX_PARTITIONS: usize = 4;
 
 pub struct SharedDisplay {
-    // keep track of area and dirty area
-    partitions: heapless::Vec<(Rectangle, Rectangle), MAX_PARTITIONS>,
+    // keep track of partition areas
+    partitions: heapless::Vec<Rectangle, MAX_PARTITIONS>,
 }
 
 impl SharedDisplay {
@@ -34,14 +34,12 @@ impl SharedDisplay {
 
         // check area not overlapping with existing partitions
         for p in self.partitions.iter() {
-            if p.0.intersection(&area).size != Size::new(0, 0) {
+            if p.intersection(&area).size != Size::new(0, 0) {
                 return None;
             }
         }
 
-        self.partitions
-            .push((area.clone(), Rectangle::new(area.top_left, Size::new(0, 0))))
-            .unwrap();
+        self.partitions.push(area.clone()).unwrap();
 
         Some(display.new_partition(area))
     }
