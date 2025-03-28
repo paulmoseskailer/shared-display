@@ -107,3 +107,8 @@ impl SharedDisplay {
         Some((left_part, right_part))
     }
 }
+
+pub trait App {
+    type Display;
+    async fn update_display(&self, d: &mut Self::Display);
+}
