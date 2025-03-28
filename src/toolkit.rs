@@ -43,7 +43,6 @@ impl SharedDisplay {
         }
 
         self.partitions.push(area.clone()).unwrap();
-        println!("after adding new partition have {}", self.partitions.len());
 
         Some(display.new_partition(area))
     }
@@ -110,5 +109,8 @@ impl SharedDisplay {
 
 pub trait App {
     type Display;
-    async fn update_display(&self, d: &mut Self::Display);
+
+    // how the display should be updated every frame
+    // returns the updated area
+    async fn update_display(&self, d: &mut Self::Display) -> Rectangle;
 }

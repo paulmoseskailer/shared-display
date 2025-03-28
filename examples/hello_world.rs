@@ -43,7 +43,7 @@ struct LineApp {}
 impl App for LineApp {
     type Display = DisplayPartition<BinaryColor, SimulatorDisplay<BinaryColor>>;
 
-    async fn update_display(&self, display: &mut Self::Display) {
+    async fn update_display(&self, display: &mut Self::Display) -> Rectangle {
         display.clear(BinaryColor::Off).await.unwrap();
         Line::new(Point::new(0, 0), Point::new(128, 128))
             .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::On, 1), display)
@@ -53,6 +53,8 @@ impl App for LineApp {
             .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::On, 1), display)
             .await
             .unwrap();
+
+        Rectangle::with_corners(Point::new(0, 0), Point::new(63, 63))
     }
 }
 
@@ -82,8 +84,13 @@ async fn main(spawner: Spawner) {
     assert_eq!(apps.len(), displays.len());
 
     loop {
+        let mut total_updated_area: Option<Rectangle> = None;
         for (i, app) in apps.iter().enumerate() {
-            app.update_display(&mut displays[i]).await;
+            let updated_area = app.update_display(&mut displays[i]).await;
+            total_updated_area = Some(match total_updated_area {
+                None => updated_area,
+                Some(before) => before.envelope(&updated_area),
+            })
         }
         if !flush_simulator_display(&mut display, &mut window).await {
             break;
