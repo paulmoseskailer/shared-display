@@ -13,7 +13,7 @@ use embedded_graphics_simulator::{
 };
 use shared_display::{
     sharable_display::DisplayPartition,
-    toolkit::{App, SharedDisplay},
+    toolkit::{update_all_apps, App, SharedDisplay},
 };
 
 fn init_simulator_display() -> (SimulatorDisplay<BinaryColor>, Window) {
@@ -38,23 +38,34 @@ async fn flush_simulator_display(
     true
 }
 
-struct LineApp {}
+struct LineApp {
+    even_frame: bool,
+}
 
 impl App for LineApp {
     type Display = DisplayPartition<BinaryColor, SimulatorDisplay<BinaryColor>>;
 
-    async fn update_display(&self, display: &mut Self::Display) -> Rectangle {
+    async fn update_display(&mut self, display: &mut Self::Display) -> Option<Rectangle> {
         display.clear(BinaryColor::Off).await.unwrap();
-        Line::new(Point::new(0, 0), Point::new(128, 128))
-            .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::On, 1), display)
-            .await
-            .unwrap();
-        Line::new(Point::new(0, 63), Point::new(63, 0))
-            .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::On, 1), display)
-            .await
-            .unwrap();
 
-        Rectangle::with_corners(Point::new(0, 0), Point::new(63, 63))
+        self.even_frame = !self.even_frame;
+        if self.even_frame {
+            return None;
+        } else {
+            Line::new(Point::new(0, 0), Point::new(128, 128))
+                .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::On, 1), display)
+                .await
+                .unwrap();
+            Line::new(Point::new(0, 63), Point::new(63, 0))
+                .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::On, 1), display)
+                .await
+                .unwrap();
+
+            return Some(Rectangle::with_corners(
+                Point::new(0, 0),
+                Point::new(63, 63),
+            ));
+        }
     }
 }
 
@@ -64,36 +75,29 @@ async fn main(spawner: Spawner) {
 
     let mut shared_display: SharedDisplay = SharedDisplay::new().await;
 
-    let app_1 = LineApp {};
-    let app_2 = LineApp {};
-
-    let apps = vec![app_1, app_2];
+    let mut app_1 = LineApp { even_frame: true };
+    let mut app_2 = LineApp { even_frame: false };
 
     let right_rect = Rectangle::new(Point::new(64, 0), Size::new(64, 64));
-    let right_display = shared_display
+    let mut right_display = shared_display
         .new_partition(&mut display, right_rect)
         .unwrap();
 
     let left_rect = Rectangle::new(Point::new(0, 0), Size::new(64, 64));
-    let left_display = shared_display
+    let mut left_display = shared_display
         .new_partition(&mut display, left_rect)
         .unwrap();
 
-    let mut displays = vec![left_display, right_display];
-
-    assert_eq!(apps.len(), displays.len());
-
     loop {
-        let mut total_updated_area: Option<Rectangle> = None;
-        for (i, app) in apps.iter().enumerate() {
-            let updated_area = app.update_display(&mut displays[i]).await;
-            total_updated_area = Some(match total_updated_area {
-                None => updated_area,
-                Some(before) => before.envelope(&updated_area),
-            })
-        }
-        if !flush_simulator_display(&mut display, &mut window).await {
-            break;
+        let total_updated_area = update_all_apps(
+            &mut [&mut app_1, &mut app_2],
+            &mut [&mut left_display, &mut right_display],
+        )
+        .await;
+        if total_updated_area.is_some() {
+            if !flush_simulator_display(&mut display, &mut window).await {
+                break;
+            }
         }
         Timer::after_millis(100).await;
     }

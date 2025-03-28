@@ -112,5 +112,25 @@ pub trait App {
 
     // how the display should be updated every frame
     // returns the updated area
-    async fn update_display(&self, d: &mut Self::Display) -> Rectangle;
+    async fn update_display(&mut self, d: &mut Self::Display) -> Option<Rectangle>;
+}
+
+pub async fn update_all_apps<A, D>(
+    apps: &mut [&mut A],
+    mut displays: &mut [&mut D],
+) -> Option<Rectangle>
+where
+    A: App<Display = D>,
+{
+    let mut total_updated_area: Option<Rectangle> = None;
+    for (i, app) in apps.into_iter().enumerate() {
+        let Some(updated_area) = app.update_display(&mut displays[i]).await else {
+            continue;
+        };
+        total_updated_area = Some(match total_updated_area {
+            None => updated_area,
+            Some(before) => before.envelope(&updated_area),
+        });
+    }
+    total_updated_area
 }
