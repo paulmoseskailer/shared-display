@@ -6,7 +6,7 @@ use embedded_graphics::{
     pixelcolor::BinaryColor,
     prelude::*,
     primitives::{Line, PrimitiveStyle, Rectangle, StyledDrawable},
-    text::{Alignment, Baseline, Text, TextStyleBuilder},
+    text::{Alignment, Baseline, Text, TextStyle, TextStyleBuilder},
 };
 use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
@@ -69,14 +69,62 @@ impl App for LineApp {
     }
 }
 
+struct TextApp<'a> {
+    even_frame: bool,
+    character_style: MonoTextStyle<'a, BinaryColor>,
+    text_style: TextStyle,
+}
+
+impl<'a> App for TextApp<'a> {
+    type Display = DisplayPartition<BinaryColor, SimulatorDisplay<BinaryColor>>;
+
+    async fn update_display(&mut self, display: &mut Self::Display) -> Option<Rectangle> {
+        display.clear(BinaryColor::Off).await.unwrap();
+
+        self.even_frame = !self.even_frame;
+        if self.even_frame {
+            return None;
+        } else {
+            Text::with_text_style(
+                "hello \n world",
+                Point::new(30, 20),
+                self.character_style,
+                self.text_style,
+            )
+            .draw(display)
+            .await
+            .unwrap();
+
+            return Some(Rectangle::with_corners(
+                Point::new(0, 0),
+                Point::new(63, 63),
+            ));
+        }
+    }
+}
+
 #[embassy_executor::main]
-async fn main(spawner: Spawner) {
+async fn main(_spawner: Spawner) {
     let (mut display, mut window) = init_simulator_display();
 
     let mut shared_display: SharedDisplay = SharedDisplay::new().await;
 
-    let mut app_1 = LineApp { even_frame: true };
-    let mut app_2 = LineApp { even_frame: false };
+    let character_style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
+    let text_style = TextStyleBuilder::new()
+        .baseline(Baseline::Middle)
+        .alignment(Alignment::Center)
+        .build();
+    //let mut app_1 = LineApp { even_frame: true };
+    let mut app_1 = TextApp {
+        even_frame: true,
+        character_style,
+        text_style,
+    };
+    let mut app_2 = TextApp {
+        even_frame: false,
+        character_style,
+        text_style,
+    };
 
     let right_rect = Rectangle::new(Point::new(64, 0), Size::new(64, 64));
     let mut right_display = shared_display
@@ -99,6 +147,6 @@ async fn main(spawner: Spawner) {
                 break;
             }
         }
-        Timer::after_millis(100).await;
+        Timer::after_millis(500).await;
     }
 }

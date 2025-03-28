@@ -117,7 +117,7 @@ pub trait App {
 
 pub async fn update_all_apps<A, D>(
     apps: &mut [&mut A],
-    mut displays: &mut [&mut D],
+    displays: &mut [&mut D],
 ) -> Option<Rectangle>
 where
     A: App<Display = D>,
