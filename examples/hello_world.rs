@@ -1,4 +1,5 @@
 use embassy_executor::Spawner;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::Timer;
 use embedded_graphics::{
     geometry::Size,
@@ -12,8 +13,14 @@ use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
 use shared_display::{sharable_display::DisplayPartition, toolkit::SharedDisplay};
+use static_cell::StaticCell;
 
-fn init_simulator_display() -> (SimulatorDisplay<BinaryColor>, Window) {
+type DisplayType = SimulatorDisplay<BinaryColor>;
+static SPAWNER: StaticCell<Spawner> = StaticCell::new();
+static SHARED_DISPLAY: Mutex<CriticalSectionRawMutex, Option<SharedDisplay<DisplayType>>> =
+    Mutex::new(None);
+
+fn init_simulator_display() -> (DisplayType, Window) {
     let output_settings = OutputSettingsBuilder::new()
         .theme(BinaryColorTheme::OledWhite)
         .build();
@@ -24,9 +31,7 @@ fn init_simulator_display() -> (SimulatorDisplay<BinaryColor>, Window) {
 }
 
 #[embassy_executor::task]
-async fn print_hello(
-    mut display: DisplayPartition<BinaryColor, SimulatorDisplay<BinaryColor>>,
-) -> () {
+async fn print_hello(mut display: DisplayPartition<BinaryColor, DisplayType>) -> () {
     let character_style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
     let text_style = TextStyleBuilder::new()
         .baseline(Baseline::Middle)
@@ -49,9 +54,7 @@ async fn print_hello(
     }
 }
 #[embassy_executor::task]
-async fn draw_line(
-    mut display: DisplayPartition<BinaryColor, SimulatorDisplay<BinaryColor>>,
-) -> () {
+async fn draw_line(mut display: DisplayPartition<BinaryColor, DisplayType>) -> () {
     loop {
         Line::new(Point::new(0, 0), Point::new(128, 128))
             .draw_styled(
@@ -74,35 +77,53 @@ async fn draw_line(
     }
 }
 
-#[embassy_executor::task]
-async fn flush_simulator_display(mut display: SimulatorDisplay<BinaryColor>, mut window: Window) {
-    loop {
-        window.update(&mut display);
-        if window.events().any(|e| e == SimulatorEvent::Quit) {
-            break;
-        }
-        Timer::after_millis(50).await;
+async fn flush_simulator_display(display: &mut DisplayType, window: &mut Window) -> bool {
+    window.update(display);
+    if window.events().any(|e| e == SimulatorEvent::Quit) {
+        return false;
     }
+    true
 }
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    let (mut display, window) = init_simulator_display();
-
-    let mut shared_display: SharedDisplay = SharedDisplay::new().await;
+    let (display, mut window) = init_simulator_display();
+    let shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display).await;
+    {
+        let mut guard = SHARED_DISPLAY.lock().await;
+        *guard = Some(shared_display);
+    }
+    let _spawner_ref: &'static Spawner = SPAWNER.init(spawner);
 
     let right_rect = Rectangle::new(Point::new(64, 0), Size::new(64, 64));
-    let right_display = shared_display
-        .new_partition(&mut display, right_rect)
+    let right_display = SHARED_DISPLAY
+        .lock()
+        .await
+        .as_mut()
+        .unwrap()
+        .new_partition(right_rect)
         .unwrap();
-    // TODO this should be the toolkit assign_app!
     spawner.must_spawn(draw_line(right_display));
 
     let left_rect = Rectangle::new(Point::new(0, 0), Size::new(64, 64));
-    let left_display = shared_display
-        .new_partition(&mut display, left_rect)
+    let left_display = SHARED_DISPLAY
+        .lock()
+        .await
+        .as_mut()
+        .unwrap()
+        .new_partition(left_rect)
         .unwrap();
     spawner.must_spawn(print_hello(left_display));
 
-    spawner.must_spawn(flush_simulator_display(display, window));
+    loop {
+        if !flush_simulator_display(
+            &mut SHARED_DISPLAY.lock().await.as_mut().unwrap().real_display,
+            &mut window,
+        )
+        .await
+        {
+            break;
+        }
+        Timer::after_millis(100).await;
+    }
 }
