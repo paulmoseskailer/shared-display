@@ -107,14 +107,49 @@ impl SharedDisplay {
     }
 }
 
-pub trait App {
+pub trait AppImpl {
     type Display;
 
     // how the display should be updated every frame
     // returns the updated area
-    async fn update_display(&mut self, d: &mut Self::Display) -> Option<Rectangle>;
+    async fn update_display_impl(&mut self, display: &mut Self::Display) -> Option<Rectangle>;
 }
 
+pub struct DummyApp {}
+impl AppImpl for DummyApp {
+    type Display = ();
+    async fn update_display_impl(&mut self, _display: &mut Self::Display) -> Option<Rectangle> {
+        None
+    }
+}
+
+pub struct LocalBox {
+    content: [u8; 100],
+    metadata: <DummyApp as core::ptr::Pointee>::Metadata,
+}
+
+pub trait App {
+    type Display;
+
+    fn update_display(&mut self, display: &mut Self::Display) -> LocalBox;
+}
+
+impl<A> App for A
+where
+    A: AppImpl,
+{
+    type Display = A::Display;
+
+    fn update_display(&mut self, display: &mut Self::Display) -> LocalBox {
+        let fut = self.update_display_impl(display);
+        LocalBox {
+            content: unsafe { *(core::ptr::from_raw_parts(&fut, ())) },
+            metadata: core::ptr::metadata(&fut),
+        }
+    }
+}
+
+/*
 pub async fn update_all_apps<A, D>(
     apps: &mut [&mut A],
     displays: &mut [&mut D],
@@ -134,3 +169,4 @@ where
     }
     total_updated_area
 }
+*/
