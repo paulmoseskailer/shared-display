@@ -16,12 +16,12 @@ use shared_display::{
 };
 use static_cell::StaticCell;
 
-type MySimDisplay = SimulatorDisplay<BinaryColor>;
+type DisplayType = SimulatorDisplay<BinaryColor>;
 static SPAWNER: StaticCell<Spawner> = StaticCell::new();
-static SHARED_DISPLAY: Mutex<CriticalSectionRawMutex, Option<SharedDisplay<MySimDisplay>>> =
+static SHARED_DISPLAY: Mutex<CriticalSectionRawMutex, Option<SharedDisplay<DisplayType>>> =
     Mutex::new(None);
 
-fn init_simulator_display() -> (MySimDisplay, Window) {
+fn init_simulator_display() -> (DisplayType, Window) {
     let output_settings = OutputSettingsBuilder::new()
         .theme(BinaryColorTheme::OledWhite)
         .build();
@@ -35,7 +35,7 @@ fn init_simulator_display() -> (MySimDisplay, Window) {
 async fn draw_cross_recursive(
     spawner: &'static Spawner,
     recursion_level: u8,
-    mut display: DisplayPartition<BinaryColor, MySimDisplay>,
+    mut display: DisplayPartition<BinaryColor, DisplayType>,
 ) -> () {
     let max_x: i32 = (display.bounding_box().size.width - 1).try_into().unwrap();
     let max_y: i32 = (display.bounding_box().size.height - 1).try_into().unwrap();
@@ -49,7 +49,7 @@ async fn draw_cross_recursive(
             )
             .await
             .unwrap();
-        Timer::after_millis(500).await;
+        Timer::after_millis(200).await;
         Line::new(Point::new(0, max_y), Point::new(max_x, 0))
             .draw_styled(
                 &PrimitiveStyle::with_stroke(BinaryColor::On, 1),
@@ -59,7 +59,7 @@ async fn draw_cross_recursive(
             .unwrap();
         Timer::after_millis(500).await;
         display.clear(BinaryColor::Off).await.unwrap();
-        Timer::after_millis(300).await;
+        Timer::after_millis(200).await;
 
         if recursion_level > 0 && Instant::now().duration_since(start).as_secs() > 1 {
             break;
@@ -88,7 +88,8 @@ async fn draw_cross_recursive(
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (display, mut window) = init_simulator_display();
-    let shared_display: SharedDisplay<MySimDisplay> = SharedDisplay::new(display).await;
+
+    let shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display).await;
     {
         let mut guard = SHARED_DISPLAY.lock().await;
         *guard = Some(shared_display);

@@ -86,22 +86,6 @@ where
 
         Some((left_part, right_part))
     }
-
-    pub async fn flush_loop<F>(&mut self, mut flush: F)
-    where
-        F: AsyncFnMut(&mut D) -> FlushResult,
-    {
-        loop {
-            match flush(&mut self.real_display).await {
-                FlushResult::Continue => {
-                    Timer::after_millis(100).await;
-                }
-                FlushResult::Abort => {
-                    break;
-                }
-            }
-        }
-    }
 }
 
 pub enum FlushResult {
