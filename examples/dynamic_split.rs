@@ -10,7 +10,10 @@ use embedded_graphics::{
 use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
-use shared_display::{sharable_display::DisplayPartition, toolkit::SharedDisplay};
+use shared_display::{
+    sharable_display::DisplayPartition,
+    toolkit::{flush_loop, FlushResult, SharedDisplay},
+};
 use static_cell::StaticCell;
 
 type MySimDisplay = SimulatorDisplay<BinaryColor>;
@@ -82,14 +85,6 @@ async fn draw_cross_recursive(
     ));
 }
 
-async fn flush_simulator_display(display: &mut MySimDisplay, window: &mut Window) -> bool {
-    window.update(display);
-    if window.events().any(|e| e == SimulatorEvent::Quit) {
-        return false;
-    }
-    true
-}
-
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (display, mut window) = init_simulator_display();
@@ -111,15 +106,12 @@ async fn main(spawner: Spawner) {
     spawner.must_spawn(draw_cross_recursive(spawner_ref, 1, left_display));
     spawner.must_spawn(draw_cross_recursive(spawner_ref, 2, right_display));
 
-    loop {
-        if !flush_simulator_display(
-            &mut SHARED_DISPLAY.lock().await.as_mut().unwrap().real_display,
-            &mut window,
-        )
-        .await
-        {
-            break;
+    flush_loop(&SHARED_DISPLAY, async |d| {
+        window.update(d);
+        if window.events().any(|e| e == SimulatorEvent::Quit) {
+            return FlushResult::Abort;
         }
-        Timer::after_millis(100).await;
-    }
+        FlushResult::Continue
+    })
+    .await;
 }

@@ -1,3 +1,5 @@
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embassy_time::Timer;
 use embedded_graphics::{
     geometry::{Point, Size},
     primitives::Rectangle,
@@ -83,5 +85,53 @@ where
         ))?;
 
         Some((left_part, right_part))
+    }
+
+    pub async fn flush_loop<F>(&mut self, mut flush: F)
+    where
+        F: AsyncFnMut(&mut D) -> FlushResult,
+    {
+        loop {
+            match flush(&mut self.real_display).await {
+                FlushResult::Continue => {
+                    Timer::after_millis(100).await;
+                }
+                FlushResult::Abort => {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+pub enum FlushResult {
+    Continue,
+    Abort,
+}
+
+pub async fn flush_loop<F, D>(
+    shared_display_mutex: &Mutex<CriticalSectionRawMutex, Option<SharedDisplay<D>>>,
+    mut flush: F,
+) where
+    D: SharableBufferedDisplay,
+    F: AsyncFnMut(&mut D) -> FlushResult,
+{
+    loop {
+        match flush(
+            &mut shared_display_mutex
+                .lock()
+                .await
+                .as_mut()
+                .unwrap()
+                .real_display,
+        )
+        .await
+        {
+            FlushResult::Continue => {}
+            FlushResult::Abort => {
+                break;
+            }
+        }
+        Timer::after_millis(500).await;
     }
 }
