@@ -10,7 +10,7 @@ use crate::sharable_display::{DisplayPartition, SharableBufferedDisplay};
 const MAX_PARTITIONS: usize = 6;
 
 pub struct SharedDisplay<D: SharableBufferedDisplay> {
-    pub real_display: D,
+    pub real_display: Mutex<CriticalSectionRawMutex, D>,
     // keep track of partition areas
     partitions: heapless::Vec<Rectangle, MAX_PARTITIONS>,
 }
@@ -21,14 +21,16 @@ where
 {
     pub async fn new(real_display: D) -> Self {
         SharedDisplay {
-            real_display,
+            real_display: Mutex::new(real_display),
             partitions: heapless::Vec::new(),
         }
     }
 
-    pub fn new_partition(&mut self, area: Rectangle) -> Option<DisplayPartition<B, D>> {
+    pub async fn new_partition(&mut self, area: Rectangle) -> Option<DisplayPartition<B, D>> {
+        let real_display: &mut D = &mut *self.real_display.lock().await;
+
         // check area inside display
-        let bb = self.real_display.bounding_box();
+        let bb = real_display.bounding_box();
         if !(bb.contains(area.top_left)
             && bb.contains(area.bottom_right().unwrap_or(area.top_left)))
         {
@@ -44,12 +46,14 @@ where
 
         self.partitions.push(area.clone()).unwrap();
 
-        Some(self.real_display.new_partition(area))
+        Some(real_display.new_partition(area))
     }
 
-    pub fn split_vertically(&mut self) -> Option<(DisplayPartition<B, D>, DisplayPartition<B, D>)> {
+    pub async fn split_vertically(
+        &mut self,
+    ) -> Option<(DisplayPartition<B, D>, DisplayPartition<B, D>)> {
         // TODO split_buffer_vertically should return Result
-        let (left_part, right_part) = self.real_display.split_buffer_vertically();
+        let (left_part, right_part) = self.real_display.lock().await.split_buffer_vertically();
 
         self.partitions.push(left_part.partition).unwrap();
         self.partitions.push(right_part.partition).unwrap();
@@ -59,7 +63,7 @@ where
 
     /// Re-splits an existing partition. Fails if the partition doesn't exist but does not remove
     /// the current partition's screen access
-    pub fn split_existing_unchecked(
+    pub async fn split_existing_unchecked(
         &mut self,
         existing_area: Rectangle,
     ) -> Option<(DisplayPartition<B, D>, DisplayPartition<B, D>)> {
@@ -75,16 +79,35 @@ where
 
         let half_width = existing_area.size.width / 2;
 
-        let left_part = self.new_partition(Rectangle::new(
-            existing_area.top_left,
-            Size::new(half_width, existing_area.size.height),
-        ))?;
-        let right_part = self.new_partition(Rectangle::new(
-            existing_area.top_left + Point::new(half_width as i32, 0),
-            Size::new(half_width, existing_area.size.height),
-        ))?;
+        let left_part = self
+            .new_partition(Rectangle::new(
+                existing_area.top_left,
+                Size::new(half_width, existing_area.size.height),
+            ))
+            .await?;
+        let right_part = self
+            .new_partition(Rectangle::new(
+                existing_area.top_left + Point::new(half_width as i32, 0),
+                Size::new(half_width, existing_area.size.height),
+            ))
+            .await?;
 
         Some((left_part, right_part))
+    }
+
+    pub async fn flush_loop<F>(&self, mut flush: F)
+    where
+        F: AsyncFnMut(&mut D) -> FlushResult,
+    {
+        loop {
+            match flush(&mut *self.real_display.lock().await).await {
+                FlushResult::Continue => {}
+                FlushResult::Abort => {
+                    break;
+                }
+            }
+            Timer::after_millis(500).await;
+        }
     }
 }
 
@@ -102,12 +125,14 @@ pub async fn flush_loop<F, D>(
 {
     loop {
         match flush(
-            &mut shared_display_mutex
+            &mut *shared_display_mutex
                 .lock()
                 .await
                 .as_mut()
                 .unwrap()
-                .real_display,
+                .real_display
+                .lock()
+                .await,
         )
         .await
         {

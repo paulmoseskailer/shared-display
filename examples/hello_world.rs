@@ -1,5 +1,4 @@
 use embassy_executor::Spawner;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::Timer;
 use embedded_graphics::{
     geometry::Size,
@@ -14,14 +13,12 @@ use embedded_graphics_simulator::{
 };
 use shared_display::{
     sharable_display::DisplayPartition,
-    toolkit::{flush_loop, FlushResult, SharedDisplay},
+    toolkit::{FlushResult, SharedDisplay},
 };
 use static_cell::StaticCell;
 
 type DisplayType = SimulatorDisplay<BinaryColor>;
 static SPAWNER: StaticCell<Spawner> = StaticCell::new();
-static SHARED_DISPLAY: Mutex<CriticalSectionRawMutex, Option<SharedDisplay<DisplayType>>> =
-    Mutex::new(None);
 
 fn init_simulator_display() -> (DisplayType, Window) {
     let output_settings = OutputSettingsBuilder::new()
@@ -83,39 +80,24 @@ async fn draw_line(mut display: DisplayPartition<BinaryColor, DisplayType>) -> (
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (display, mut window) = init_simulator_display();
-    let shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display).await;
-    {
-        let mut guard = SHARED_DISPLAY.lock().await;
-        *guard = Some(shared_display);
-    }
+    let mut shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display).await;
     let _spawner_ref: &'static Spawner = SPAWNER.init(spawner);
 
     let right_rect = Rectangle::new(Point::new(64, 0), Size::new(64, 64));
-    let right_display = SHARED_DISPLAY
-        .lock()
-        .await
-        .as_mut()
-        .unwrap()
-        .new_partition(right_rect)
-        .unwrap();
+    let right_display = shared_display.new_partition(right_rect).await.unwrap();
     spawner.must_spawn(draw_line(right_display));
 
     let left_rect = Rectangle::new(Point::new(0, 0), Size::new(64, 64));
-    let left_display = SHARED_DISPLAY
-        .lock()
-        .await
-        .as_mut()
-        .unwrap()
-        .new_partition(left_rect)
-        .unwrap();
+    let left_display = shared_display.new_partition(left_rect).await.unwrap();
     spawner.must_spawn(print_hello(left_display));
 
-    flush_loop(&SHARED_DISPLAY, async |d| {
-        window.update(d);
-        if window.events().any(|e| e == SimulatorEvent::Quit) {
-            return FlushResult::Abort;
-        }
-        FlushResult::Continue
-    })
-    .await;
+    shared_display
+        .flush_loop(async |d| {
+            window.update(d);
+            if window.events().any(|e| e == SimulatorEvent::Quit) {
+                return FlushResult::Abort;
+            }
+            FlushResult::Continue
+        })
+        .await;
 }

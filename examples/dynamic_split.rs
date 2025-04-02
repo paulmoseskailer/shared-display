@@ -31,7 +31,7 @@ fn init_simulator_display() -> (DisplayType, Window) {
     )
 }
 
-#[embassy_executor::task(pool_size = 10)]
+#[embassy_executor::task(pool_size = 4)]
 async fn draw_cross_recursive(
     spawner: &'static Spawner,
     recursion_level: u8,
@@ -72,6 +72,7 @@ async fn draw_cross_recursive(
         .as_mut()
         .unwrap()
         .split_existing_unchecked(display.partition)
+        .await
         .unwrap();
     spawner.must_spawn(draw_cross_recursive(
         spawner,
@@ -102,10 +103,11 @@ async fn main(spawner: Spawner) {
         .as_mut()
         .unwrap()
         .split_vertically()
+        .await
         .unwrap();
 
-    spawner.must_spawn(draw_cross_recursive(spawner_ref, 1, left_display));
-    spawner.must_spawn(draw_cross_recursive(spawner_ref, 2, right_display));
+    spawner.must_spawn(draw_cross_recursive(spawner_ref, 0, left_display));
+    spawner.must_spawn(draw_cross_recursive(spawner_ref, 1, right_display));
 
     flush_loop(&SHARED_DISPLAY, async |d| {
         window.update(d);
