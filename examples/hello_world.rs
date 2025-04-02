@@ -13,23 +13,22 @@ use embedded_graphics_simulator::{
 };
 use shared_display::{
     sharable_display::DisplayPartition,
-    toolkit::{update_all_apps, App, SharedDisplay},
+    toolkit::{update_all_apps, App, AppImpl, SharedDisplay},
 };
 
-fn init_simulator_display() -> (SimulatorDisplay<BinaryColor>, Window) {
+type DisplayType = SimulatorDisplay<BinaryColor>;
+
+fn init_simulator_display() -> (DisplayType, Window) {
     let output_settings = OutputSettingsBuilder::new()
         .theme(BinaryColorTheme::OledWhite)
         .build();
     (
-        SimulatorDisplay::new(Size::new(128, 64)),
+        DisplayType::new(Size::new(128, 64)),
         Window::new("Simulated Display", &output_settings),
     )
 }
 
-async fn flush_simulator_display(
-    display: &mut SimulatorDisplay<BinaryColor>,
-    window: &mut Window,
-) -> bool {
+async fn flush_simulator_display(display: &mut DisplayType, window: &mut Window) -> bool {
     window.update(display);
     if window.events().any(|e| e == SimulatorEvent::Quit) {
         return false;
@@ -42,10 +41,10 @@ struct LineApp {
     even_frame: bool,
 }
 
-impl App for LineApp {
-    type Display = DisplayPartition<BinaryColor, SimulatorDisplay<BinaryColor>>;
+impl AppImpl for LineApp {
+    type Display = DisplayPartition<BinaryColor, DisplayType>;
 
-    async fn update_display(&mut self, display: &mut Self::Display) -> Option<Rectangle> {
+    async fn update_display_impl(&mut self, display: &mut Self::Display) -> Option<Rectangle> {
         display.clear(BinaryColor::Off).await.unwrap();
 
         self.even_frame = !self.even_frame;
@@ -75,10 +74,10 @@ struct TextApp<'a> {
     text_style: TextStyle,
 }
 
-impl<'a> App for TextApp<'a> {
-    type Display = DisplayPartition<BinaryColor, SimulatorDisplay<BinaryColor>>;
+impl<'a> AppImpl for TextApp<'a> {
+    type Display = DisplayPartition<BinaryColor, DisplayType>;
 
-    async fn update_display(&mut self, display: &mut Self::Display) -> Option<Rectangle> {
+    async fn update_display_impl(&mut self, display: &mut Self::Display) -> Option<Rectangle> {
         display.clear(BinaryColor::Off).await.unwrap();
 
         self.even_frame = !self.even_frame;
@@ -114,13 +113,8 @@ async fn main(_spawner: Spawner) {
         .baseline(Baseline::Middle)
         .alignment(Alignment::Center)
         .build();
-    //let mut app_1 = LineApp { even_frame: true };
-    let mut app_1 = TextApp {
-        even_frame: true,
-        character_style,
-        text_style,
-    };
-    let mut app_2 = TextApp {
+    let app_1 = LineApp { even_frame: true };
+    let app_2 = TextApp {
         even_frame: false,
         character_style,
         text_style,
@@ -136,12 +130,12 @@ async fn main(_spawner: Spawner) {
         .new_partition(&mut display, left_rect)
         .unwrap();
 
+    let apps: &mut [Box<dyn App<Display = DisplayPartition<BinaryColor, DisplayType>>>] =
+        &mut [Box::new(app_1), Box::new(app_2)];
+
     loop {
-        let total_updated_area = update_all_apps(
-            &mut [&mut app_1, &mut app_2],
-            &mut [&mut left_display, &mut right_display],
-        )
-        .await;
+        let total_updated_area =
+            update_all_apps(apps, &mut [&mut left_display, &mut right_display]).await;
         if total_updated_area.is_some() {
             if !flush_simulator_display(&mut display, &mut window).await {
                 break;

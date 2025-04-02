@@ -1,3 +1,4 @@
+use core::future::Future;
 use embedded_graphics::{
     geometry::{Point, Size},
     primitives::Rectangle,
@@ -107,21 +108,42 @@ impl SharedDisplay {
     }
 }
 
-pub trait App {
+pub trait AppImpl {
     type Display;
 
     // how the display should be updated every frame
     // returns the updated area
-    async fn update_display(&mut self, d: &mut Self::Display) -> Option<Rectangle>;
+    async fn update_display_impl(&mut self, d: &mut Self::Display) -> Option<Rectangle>;
 }
 
-pub async fn update_all_apps<A, D>(
-    apps: &mut [&mut A],
-    displays: &mut [&mut D],
-) -> Option<Rectangle>
+use core::pin::Pin;
+pub trait App {
+    type Display;
+
+    fn update_display<'a>(
+        &'a mut self,
+        d: &'a mut Self::Display,
+    ) -> Pin<Box<dyn Future<Output = Option<Rectangle>> + 'a>>;
+}
+
+impl<A> App for A
 where
-    A: App<Display = D>,
+    A: AppImpl,
 {
+    type Display = A::Display;
+
+    fn update_display<'a>(
+        &'a mut self,
+        d: &'a mut Self::Display,
+    ) -> Pin<Box<dyn Future<Output = Option<Rectangle>> + 'a>> {
+        Box::pin(self.update_display_impl(d))
+    }
+}
+
+pub async fn update_all_apps<D>(
+    apps: &mut [Box<dyn App<Display = D>>],
+    displays: &mut [&mut D],
+) -> Option<Rectangle> {
     let mut total_updated_area: Option<Rectangle> = None;
     for (i, app) in apps.into_iter().enumerate() {
         let Some(updated_area) = app.update_display(&mut displays[i]).await else {
