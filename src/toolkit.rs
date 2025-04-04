@@ -1,7 +1,7 @@
 use core::future::Future;
 use core::pin::Pin;
 use embassy_executor::Spawner;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
 use embassy_time::Timer;
 use embedded_graphics::{
     geometry::{Point, Size},
@@ -11,6 +11,7 @@ use embedded_graphics::{
 use crate::sharable_display::{DisplayPartition, SharableBufferedDisplay};
 
 const MAX_APPS: usize = 6;
+pub static EVENTS: Channel<CriticalSectionRawMutex, ResizeEvent, MAX_APPS> = Channel::new();
 
 pub enum AppStart {
     Success,
@@ -20,6 +21,10 @@ pub enum AppStart {
 pub enum FlushResult {
     Continue,
     Abort,
+}
+
+pub enum ResizeEvent {
+    AppClosed(Rectangle),
 }
 
 pub struct SharedDisplay<D: SharableBufferedDisplay> {
@@ -124,7 +129,7 @@ where
         };
 
         let fut = app_fn(partition);
-        spawner.must_spawn(launch_future(Box::pin(fut)));
+        spawner.must_spawn(launch_future(Box::pin(fut), area.clone()));
 
         return AppStart::Success;
     }
@@ -140,15 +145,16 @@ where
                     break;
                 }
             }
-            Timer::after_millis(500).await;
+            Timer::after_millis(200).await;
         }
     }
 }
 
 #[embassy_executor::task(pool_size = MAX_APPS)]
-async fn launch_future(app_future: Pin<Box<dyn Future<Output = ()>>>) {
+async fn launch_future(app_future: Pin<Box<dyn Future<Output = ()>>>, area: Rectangle) {
     app_future.await;
-    // TODO: modify resize event queue
+
+    EVENTS.send(ResizeEvent::AppClosed(area)).await;
 }
 
 pub async fn launch_inside_app<F, B, D>(
@@ -160,8 +166,9 @@ where
     F: AsyncFnMut(DisplayPartition<B, D>) -> (),
     for<'b> F::CallRefFuture<'b>: 'static,
 {
+    let area = partition.partition.clone();
     let fut = app_fn(partition);
-    spawner.must_spawn(launch_future(Box::pin(fut)));
+    spawner.must_spawn(launch_future(Box::pin(fut), area));
 
     return AppStart::Success;
 }
@@ -191,6 +198,6 @@ pub async fn flush_loop<F, D>(
                 break;
             }
         }
-        Timer::after_millis(500).await;
+        Timer::after_millis(200).await;
     }
 }

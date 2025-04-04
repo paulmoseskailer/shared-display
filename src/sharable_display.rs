@@ -6,6 +6,8 @@ use embedded_graphics::{
     Pixel,
 };
 
+use crate::toolkit::ResizeEvent;
+
 pub struct DisplayPartition<B, D: ?Sized> {
     pub buffer: *mut B,
     buffer_len: usize,
@@ -83,6 +85,12 @@ where
                 right_partition,
             ),
         )
+    }
+
+    pub fn react_to_resize(&mut self, event: ResizeEvent) {
+        match event {
+            ResizeEvent::AppClosed(rect) => self.partition = self.partition.envelope(&rect),
+        }
     }
 }
 
