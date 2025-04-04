@@ -27,20 +27,16 @@ pub struct SharedDisplay<D: SharableBufferedDisplay> {
 
     // keep track of partition areas
     partitions: heapless::Vec<Rectangle, MAX_APPS>,
-
-    // to launch new apps
-    spawner: &'static Spawner,
 }
 
 impl<B, D> SharedDisplay<D>
 where
     D: SharableBufferedDisplay<BufferElement = B>,
 {
-    pub async fn new(real_display: D, spawner: &'static Spawner) -> Self {
+    pub async fn new(real_display: D) -> Self {
         SharedDisplay {
             real_display: Mutex::new(real_display),
             partitions: heapless::Vec::new(),
-            spawner,
         }
     }
 
@@ -113,7 +109,12 @@ where
         Some((left_part, right_part))
     }
 
-    pub async fn launch_new_app<F>(&mut self, mut app_fn: F, area: Rectangle) -> AppStart
+    pub async fn launch_new_app<F>(
+        &mut self,
+        spawner: &'static Spawner,
+        mut app_fn: F,
+        area: Rectangle,
+    ) -> AppStart
     where
         F: AsyncFnMut(DisplayPartition<B, D>) -> (),
         for<'b> F::CallRefFuture<'b>: 'static,
@@ -123,7 +124,7 @@ where
         };
 
         let fut = app_fn(partition);
-        self.spawner.must_spawn(launch_future(Box::pin(fut)));
+        spawner.must_spawn(launch_future(Box::pin(fut)));
 
         return AppStart::Success;
     }
@@ -147,7 +148,22 @@ where
 #[embassy_executor::task(pool_size = MAX_APPS)]
 async fn launch_future(app_future: Pin<Box<dyn Future<Output = ()>>>) {
     app_future.await;
-    // TODO modify resize event queue
+    // TODO: modify resize event queue
+}
+
+pub async fn launch_inside_app<F, B, D>(
+    spawner: &'static Spawner,
+    mut app_fn: F,
+    partition: DisplayPartition<B, D>,
+) -> AppStart
+where
+    F: AsyncFnMut(DisplayPartition<B, D>) -> (),
+    for<'b> F::CallRefFuture<'b>: 'static,
+{
+    let fut = app_fn(partition);
+    spawner.must_spawn(launch_future(Box::pin(fut)));
+
+    return AppStart::Success;
 }
 
 pub async fn flush_loop<F, D>(
