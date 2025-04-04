@@ -62,7 +62,7 @@ async fn recursive_split_app(
         }
     }
     // recursive case
-    let (left_display, right_display) = display.split_vertically();
+    let (left_display, right_display) = display.split_vertically().unwrap();
     let new_recursion_level = recursion_level - 1;
     launch_inside_app(
         spawner,
@@ -94,14 +94,16 @@ async fn main(spawner: Spawner) {
             move |disp| recursive_split_app(1, spawner_ref, disp),
             left_rect,
         )
-        .await;
+        .await
+        .unwrap();
     shared_display
         .launch_new_app(
             spawner_ref,
             move |disp| recursive_split_app(0, spawner_ref, disp),
             right_rect,
         )
-        .await;
+        .await
+        .unwrap();
 
     shared_display
         .flush_loop(async |d| {

@@ -61,8 +61,8 @@ async fn text_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> ()
 
 async fn line_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> () {
     loop {
-        let max_x: i32 = (display.partition.size.width - 1).try_into().unwrap();
-        let max_y: i32 = (display.partition.size.height - 1).try_into().unwrap();
+        let max_x: i32 = (display.area.size.width - 1).try_into().unwrap();
+        let max_y: i32 = (display.area.size.height - 1).try_into().unwrap();
         Line::new(Point::new(0, 0), Point::new(max_x, max_y))
             .draw_styled(
                 &PrimitiveStyle::with_stroke(BinaryColor::On, 1),
@@ -99,12 +99,14 @@ async fn main(spawner: Spawner) {
     let right_rect = Rectangle::new(Point::new(64, 0), Size::new(64, 64));
     shared_display
         .launch_new_app(spawner, line_app, right_rect)
-        .await;
+        .await
+        .unwrap();
 
     let left_rect = Rectangle::new(Point::new(0, 0), Size::new(64, 64));
     shared_display
         .launch_new_app(spawner, text_app, left_rect)
-        .await;
+        .await
+        .unwrap();
 
     shared_display
         .flush_loop(async |d| {

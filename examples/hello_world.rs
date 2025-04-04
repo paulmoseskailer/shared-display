@@ -87,12 +87,14 @@ async fn main(spawner: Spawner) {
     let right_rect = Rectangle::new(Point::new(64, 0), Size::new(64, 64));
     shared_display
         .launch_new_app(spawner, line_app, right_rect)
-        .await;
+        .await
+        .unwrap();
 
     let left_rect = Rectangle::new(Point::new(0, 0), Size::new(64, 64));
     shared_display
         .launch_new_app(spawner, text_app, left_rect)
-        .await;
+        .await
+        .unwrap();
 
     shared_display
         .flush_loop(async |d| {

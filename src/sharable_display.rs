@@ -8,11 +8,25 @@ use embedded_graphics::{
 
 use crate::toolkit::ResizeEvent;
 
+#[derive(Debug)]
+pub enum PartitioningError {
+    // cannot create partitions less than 8 pixels wide
+    PartitionTooSmall,
+    // display width must be divisible by both pixels as well as buffer elements
+    BufferPixelMismatch,
+    // a partition should have width divisible by 8
+    PartitionBadWidth,
+    OutsideParent,
+    Overlaps,
+    // when re-splitting partitions
+    ExistingNotFound,
+}
+
 pub struct DisplayPartition<B, D: ?Sized> {
     pub buffer: *mut B,
     buffer_len: usize,
     pub parent_size: Size,
-    pub partition: Rectangle,
+    pub area: Rectangle,
     _display: core::marker::PhantomData<D>,
 }
 
@@ -21,75 +35,67 @@ where
     C: PixelColor,
     D: SharableBufferedDisplay<BufferElement = B, Color = C> + ?Sized,
 {
-    pub fn new(
-        buffer: &mut [B],
-        parent_size: Size,
-        partition: Rectangle,
-    ) -> DisplayPartition<B, D> {
+    pub fn new(buffer: &mut [B], parent_size: Size, area: Rectangle) -> DisplayPartition<B, D> {
         DisplayPartition {
             buffer: buffer.as_mut_ptr(),
             parent_size,
             buffer_len: buffer.len(),
-            partition,
+            area,
             _display: core::marker::PhantomData,
         }
     }
 
     fn contains(&self, p: Point) -> bool {
-        self.partition.contains(p)
+        self.area.contains(p)
     }
 
-    pub fn split_vertically(&mut self) -> (DisplayPartition<B, D>, DisplayPartition<B, D>) {
-        let size = self.partition.size;
-        assert!(
-            size.width > 8,
-            "Error: can't take a partition from a display that's only 8 pixels wide"
-        );
+    pub fn split_vertically(
+        &mut self,
+    ) -> Result<(DisplayPartition<B, D>, DisplayPartition<B, D>), PartitioningError> {
+        let size = self.area.size;
 
         // ensure no bytes are split in half by rounding to a split of width multiple of 8
-        let left_partition_width = (size.width / 2) + 7 & !7;
-        let left_partition = Rectangle::new(
-            self.partition.top_left,
-            Size::new(left_partition_width, size.height),
-        );
-        let right_partition = Rectangle::new(
-            self.partition.top_left + Point::new(left_partition_width.try_into().unwrap(), 0),
-            Size::new(size.width - left_partition_width, size.height),
+        let left_area_width = (size.width / 2) + 7 & !7;
+        let left_area = Rectangle::new(self.area.top_left, Size::new(left_area_width, size.height));
+        let right_area = Rectangle::new(
+            self.area.top_left + Point::new(left_area_width.try_into().unwrap(), 0),
+            Size::new(size.width - left_area_width, size.height),
         );
 
-        assert!(
-            left_partition_width >= 8 && size.width - left_partition_width >= 8,
-            "Error: can't create partitions that are less than 8 pixels wide!"
-        );
+        if left_area_width < 8 || size.width - left_area_width < 8 {
+            return Err(PartitioningError::PartitionTooSmall);
+        }
 
         let pixels_per_buffer_el =
             (self.parent_size.width * self.parent_size.height) as usize / self.buffer_len;
-        if pixels_per_buffer_el > 1 {
-            assert_eq!(
-                self.parent_size.width % pixels_per_buffer_el as u32,
-                0,
-                "A buffer element would have to span multiple rows! Have {} pixels per buffer element and display width {} pixels. Adjust screen size or buffer element type!",
-                pixels_per_buffer_el, self.parent_size.width
-            );
+        if self.parent_size.width % pixels_per_buffer_el as u32 != 0 {
+            return Err(PartitioningError::BufferPixelMismatch);
         }
 
-        (
+        Ok((
             DisplayPartition::new(
-                unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) },
+                unsafe {
+                    // SAFETY: self.buffer and self.buffer_len are initialized from slice in new
+                    core::slice::from_raw_parts_mut(self.buffer, self.buffer_len)
+                },
                 self.parent_size,
-                left_partition,
+                left_area,
             ),
             DisplayPartition::new(
-                unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) },
+                unsafe {
+                    // SAFETY: self.buffer and self.buffer_len are initialized from slice in new
+                    core::slice::from_raw_parts_mut(self.buffer, self.buffer_len)
+                },
                 self.parent_size,
-                right_partition,
+                right_area,
             ),
-        )
+        ))
     }
 
     pub fn react_to_resize(&mut self, event: ResizeEvent) {
         match event {
-            ResizeEvent::AppClosed(rect) => self.partition = self.partition.envelope(&rect),
+            // TODO: this is bad, can't guarantee that enveloping is the right move
+            ResizeEvent::AppClosed(rect) => self.area = self.area.envelope(&rect),
         }
     }
 }
@@ -99,7 +105,7 @@ where
     D: SharableBufferedDisplay<BufferElement = B>,
 {
     fn bounding_box(&self) -> Rectangle {
-        self.partition
+        self.area
     }
 }
 
@@ -112,54 +118,53 @@ pub trait SharableBufferedDisplay: DrawTarget {
 
     fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>);
 
-    fn new_partition(&mut self, area: Rectangle) -> DisplayPartition<Self::BufferElement, Self> {
-        let parent_size = self.bounding_box().size;
-        assert!(
-            parent_size.width > 8,
-            "Error: can't take a partition from a display that's only 8 pixels wide"
-        );
-
-        let buffer_len = self.get_buffer().len();
-        let pixels_per_buffer_el = (parent_size.width * parent_size.height) as usize / buffer_len;
-        if pixels_per_buffer_el > 1 {
-            assert_eq!(
-                parent_size.width % pixels_per_buffer_el as u32,
-                0,
-                "A buffer element would have to span multiple rows! Have {} pixels per buffer element and display width {} pixels. Adjust screen size or buffer element type!",
-                pixels_per_buffer_el, parent_size.width
-            );
+    fn new_partition(
+        &mut self,
+        area: Rectangle,
+    ) -> Result<DisplayPartition<Self::BufferElement, Self>, PartitioningError> {
+        if area.size.width < 8 {
+            return Err(PartitioningError::PartitionTooSmall);
         }
 
-        assert_eq!(
-            area.size.width % 8,
-            0,
-            "Error: partition widths need to be multiples of 8!"
-        );
-        DisplayPartition::new(self.get_buffer(), parent_size, area)
+        let parent_size = self.bounding_box().size;
+        let buffer_len = self.get_buffer().len();
+        let pixels_per_buffer_el = (parent_size.width * parent_size.height) as usize / buffer_len;
+        if parent_size.width % pixels_per_buffer_el as u32 != 0 {
+            return Err(PartitioningError::BufferPixelMismatch);
+        }
+
+        if area.size.width % 8 != 0 {
+            return Err(PartitioningError::PartitionBadWidth);
+        }
+
+        Ok(DisplayPartition::new(self.get_buffer(), parent_size, area))
     }
 
     fn split_buffer_vertically(
         &mut self,
-    ) -> (
-        DisplayPartition<Self::BufferElement, Self>,
-        DisplayPartition<Self::BufferElement, Self>,
-    ) {
+    ) -> Result<
+        (
+            DisplayPartition<Self::BufferElement, Self>,
+            DisplayPartition<Self::BufferElement, Self>,
+        ),
+        PartitioningError,
+    > {
         let parent_size = self.bounding_box().size;
 
         // ensure no bytes are split in half by rounding to a split of width multiple of 8
-        let left_partition_width = (parent_size.width / 2) + 7 & !7;
-        let left_partition = Rectangle::new(
+        let left_area_width = (parent_size.width / 2) + 7 & !7;
+        let left_area = Rectangle::new(
             self.bounding_box().top_left,
-            Size::new(left_partition_width, parent_size.height),
+            Size::new(left_area_width, parent_size.height),
         );
-        let right_partition = Rectangle::new(
-            self.bounding_box().top_left + Point::new(left_partition_width.try_into().unwrap(), 0),
-            Size::new(parent_size.width - left_partition_width, parent_size.height),
+        let right_area = Rectangle::new(
+            self.bounding_box().top_left + Point::new(left_area_width.try_into().unwrap(), 0),
+            Size::new(parent_size.width - left_area_width, parent_size.height),
         );
-        (
-            self.new_partition(left_partition),
-            self.new_partition(right_partition),
-        )
+
+        let left = self.new_partition(left_area)?;
+        let right = self.new_partition(right_area)?;
+        Ok((left, right))
     }
 }
 
@@ -179,7 +184,7 @@ where
             unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) };
         pixels
             .into_iter()
-            .map(|pixel| Pixel(pixel.0 + self.partition.top_left, pixel.1))
+            .map(|pixel| Pixel(pixel.0 + self.area.top_left, pixel.1))
             .filter(|Pixel(pos, _color)| self.contains(*pos))
             .for_each(|p| {
                 let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
@@ -193,10 +198,7 @@ where
     // Make sure to remove the offset from the Rectangle to be cleared,
     // draw_iter adds it again
     async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        self.fill_solid(
-            &(Rectangle::new(Point::new(0, 0), self.partition.size)),
-            color,
-        )
-        .await
+        self.fill_solid(&(Rectangle::new(Point::new(0, 0), self.area.size)), color)
+            .await
     }
 }
