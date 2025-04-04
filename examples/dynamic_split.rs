@@ -1,25 +1,22 @@
 use embassy_executor::Spawner;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::{Instant, Timer};
 use embedded_graphics::{
     geometry::Size,
     pixelcolor::BinaryColor,
     prelude::*,
-    primitives::{Line, PrimitiveStyle, StyledDrawable},
+    primitives::{Line, PrimitiveStyle, Rectangle, StyledDrawable},
 };
 use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
 use shared_display::{
     sharable_display::DisplayPartition,
-    toolkit::{flush_loop, FlushResult, SharedDisplay},
+    toolkit::{FlushResult, SharedDisplay},
 };
 use static_cell::StaticCell;
 
 type DisplayType = SimulatorDisplay<BinaryColor>;
 static SPAWNER: StaticCell<Spawner> = StaticCell::new();
-static SHARED_DISPLAY: Mutex<CriticalSectionRawMutex, Option<SharedDisplay<DisplayType>>> =
-    Mutex::new(None);
 
 fn init_simulator_display() -> (DisplayType, Window) {
     let output_settings = OutputSettingsBuilder::new()
@@ -31,9 +28,7 @@ fn init_simulator_display() -> (DisplayType, Window) {
     )
 }
 
-#[embassy_executor::task(pool_size = 4)]
-async fn draw_cross_recursive(
-    spawner: &'static Spawner,
+async fn recursive_split_app(
     recursion_level: u8,
     mut display: DisplayPartition<BinaryColor, DisplayType>,
 ) -> () {
@@ -65,56 +60,51 @@ async fn draw_cross_recursive(
             break;
         }
     }
-    // recursive case
-    let (left_display, right_display) = SHARED_DISPLAY
-        .lock()
-        .await
-        .as_mut()
-        .unwrap()
-        .split_existing_unchecked(display.partition)
-        .await
-        .unwrap();
-    spawner.must_spawn(draw_cross_recursive(
-        spawner,
-        recursion_level - 1,
-        left_display,
-    ));
-    spawner.must_spawn(draw_cross_recursive(
-        spawner,
-        recursion_level - 1,
-        right_display,
-    ));
+    /*
+        // TODO how to handle this recursion?
+        // recursive case
+        let (left_display, right_display) = display.split_vertically();
+        let new_recursion_level = recursion_level - 1;
+        shared_display_ref
+            .launch_recursive_app(
+                move |d| recursive_split_app(new_recursion_level, shared_display_ref, d),
+                left_display,
+            )
+            .await;
+        shared_display_ref
+            .launch_recursive_app(
+                move |d| recursive_split_app(new_recursion_level, shared_display_ref, d),
+                right_display,
+            )
+            .await;
+    */
 }
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (display, mut window) = init_simulator_display();
-
-    let shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display).await;
-    {
-        let mut guard = SHARED_DISPLAY.lock().await;
-        *guard = Some(shared_display);
-    }
     let spawner_ref: &'static Spawner = SPAWNER.init(spawner);
 
-    let (left_display, right_display) = SHARED_DISPLAY
-        .lock()
-        .await
-        .as_mut()
-        .unwrap()
-        .split_vertically()
-        .await
-        .unwrap();
+    let mut shared_display: SharedDisplay<DisplayType> =
+        SharedDisplay::new(display, spawner_ref).await;
 
-    spawner.must_spawn(draw_cross_recursive(spawner_ref, 0, left_display));
-    spawner.must_spawn(draw_cross_recursive(spawner_ref, 1, right_display));
+    let half_size = Size::new(64, 64);
+    let left_rect = Rectangle::new(Point::new(0, 0), half_size);
+    let right_rect = Rectangle::new(Point::new(64, 0), half_size);
+    shared_display
+        .launch_new_app(|disp| recursive_split_app(1, disp), left_rect)
+        .await;
+    shared_display
+        .launch_new_app(|disp| recursive_split_app(0, disp), right_rect)
+        .await;
 
-    flush_loop(&SHARED_DISPLAY, async |d| {
-        window.update(d);
-        if window.events().any(|e| e == SimulatorEvent::Quit) {
-            return FlushResult::Abort;
-        }
-        FlushResult::Continue
-    })
-    .await;
+    shared_display
+        .flush_loop(async |d| {
+            window.update(d);
+            if window.events().any(|e| e == SimulatorEvent::Quit) {
+                return FlushResult::Abort;
+            }
+            FlushResult::Continue
+        })
+        .await;
 }

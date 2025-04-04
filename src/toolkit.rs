@@ -1,3 +1,6 @@
+use core::future::Future;
+use core::pin::Pin;
+use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::Timer;
 use embedded_graphics::{
@@ -7,22 +10,37 @@ use embedded_graphics::{
 
 use crate::sharable_display::{DisplayPartition, SharableBufferedDisplay};
 
-const MAX_PARTITIONS: usize = 6;
+const MAX_APPS: usize = 6;
+
+pub enum AppStart {
+    Success,
+    Failure,
+}
+
+pub enum FlushResult {
+    Continue,
+    Abort,
+}
 
 pub struct SharedDisplay<D: SharableBufferedDisplay> {
     pub real_display: Mutex<CriticalSectionRawMutex, D>,
+
     // keep track of partition areas
-    partitions: heapless::Vec<Rectangle, MAX_PARTITIONS>,
+    partitions: heapless::Vec<Rectangle, MAX_APPS>,
+
+    // to launch new apps
+    spawner: &'static Spawner,
 }
 
 impl<B, D> SharedDisplay<D>
 where
     D: SharableBufferedDisplay<BufferElement = B>,
 {
-    pub async fn new(real_display: D) -> Self {
+    pub async fn new(real_display: D, spawner: &'static Spawner) -> Self {
         SharedDisplay {
             real_display: Mutex::new(real_display),
             partitions: heapless::Vec::new(),
+            spawner,
         }
     }
 
@@ -95,6 +113,21 @@ where
         Some((left_part, right_part))
     }
 
+    pub async fn launch_new_app<F>(&mut self, mut app_fn: F, area: Rectangle) -> AppStart
+    where
+        F: AsyncFnMut(DisplayPartition<B, D>) -> (),
+        for<'b> F::CallRefFuture<'b>: 'static,
+    {
+        let Some(partition) = self.new_partition(area).await else {
+            return AppStart::Failure;
+        };
+
+        let fut = app_fn(partition);
+        self.spawner.must_spawn(launch_future(Box::pin(fut)));
+
+        return AppStart::Success;
+    }
+
     pub async fn flush_loop<F>(&self, mut flush: F)
     where
         F: AsyncFnMut(&mut D) -> FlushResult,
@@ -111,9 +144,10 @@ where
     }
 }
 
-pub enum FlushResult {
-    Continue,
-    Abort,
+#[embassy_executor::task(pool_size = MAX_APPS)]
+async fn launch_future(app_future: Pin<Box<dyn Future<Output = ()>>>) {
+    app_future.await;
+    // TODO modify resize event queue
 }
 
 pub async fn flush_loop<F, D>(

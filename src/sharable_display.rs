@@ -36,6 +36,54 @@ where
     fn contains(&self, p: Point) -> bool {
         self.partition.contains(p)
     }
+
+    pub fn split_vertically(&mut self) -> (DisplayPartition<B, D>, DisplayPartition<B, D>) {
+        let size = self.partition.size;
+        assert!(
+            size.width > 8,
+            "Error: can't take a partition from a display that's only 8 pixels wide"
+        );
+
+        // ensure no bytes are split in half by rounding to a split of width multiple of 8
+        let left_partition_width = (size.width / 2) + 7 & !7;
+        let left_partition = Rectangle::new(
+            self.partition.top_left,
+            Size::new(left_partition_width, size.height),
+        );
+        let right_partition = Rectangle::new(
+            self.partition.top_left + Point::new(left_partition_width.try_into().unwrap(), 0),
+            Size::new(size.width - left_partition_width, size.height),
+        );
+
+        assert!(
+            left_partition_width >= 8 && size.width - left_partition_width >= 8,
+            "Error: can't create partitions that are less than 8 pixels wide!"
+        );
+
+        let pixels_per_buffer_el =
+            (self.parent_size.width * self.parent_size.height) as usize / self.buffer_len;
+        if pixels_per_buffer_el > 1 {
+            assert_eq!(
+                self.parent_size.width % pixels_per_buffer_el as u32,
+                0,
+                "A buffer element would have to span multiple rows! Have {} pixels per buffer element and display width {} pixels. Adjust screen size or buffer element type!",
+                pixels_per_buffer_el, self.parent_size.width
+            );
+        }
+
+        (
+            DisplayPartition::new(
+                unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) },
+                self.parent_size,
+                left_partition,
+            ),
+            DisplayPartition::new(
+                unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) },
+                self.parent_size,
+                right_partition,
+            ),
+        )
+    }
 }
 
 impl<B, D> Dimensions for DisplayPartition<B, D>

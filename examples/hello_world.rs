@@ -15,10 +15,8 @@ use shared_display::{
     sharable_display::DisplayPartition,
     toolkit::{FlushResult, SharedDisplay},
 };
-use static_cell::StaticCell;
 
 type DisplayType = SimulatorDisplay<BinaryColor>;
-static SPAWNER: StaticCell<Spawner> = StaticCell::new();
 
 fn init_simulator_display() -> (DisplayType, Window) {
     let output_settings = OutputSettingsBuilder::new()
@@ -30,8 +28,7 @@ fn init_simulator_display() -> (DisplayType, Window) {
     )
 }
 
-#[embassy_executor::task]
-async fn print_hello(mut display: DisplayPartition<BinaryColor, DisplayType>) -> () {
+async fn text_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> () {
     let character_style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
     let text_style = TextStyleBuilder::new()
         .baseline(Baseline::Middle)
@@ -53,8 +50,8 @@ async fn print_hello(mut display: DisplayPartition<BinaryColor, DisplayType>) ->
         Timer::after_millis(500).await;
     }
 }
-#[embassy_executor::task]
-async fn draw_line(mut display: DisplayPartition<BinaryColor, DisplayType>) -> () {
+
+async fn line_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> () {
     loop {
         Line::new(Point::new(0, 0), Point::new(128, 128))
             .draw_styled(
@@ -80,16 +77,14 @@ async fn draw_line(mut display: DisplayPartition<BinaryColor, DisplayType>) -> (
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (display, mut window) = init_simulator_display();
-    let mut shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display).await;
-    let _spawner_ref: &'static Spawner = SPAWNER.init(spawner);
+    let mut shared_display: SharedDisplay<DisplayType> =
+        SharedDisplay::new(display, &spawner).await;
 
     let right_rect = Rectangle::new(Point::new(64, 0), Size::new(64, 64));
-    let right_display = shared_display.new_partition(right_rect).await.unwrap();
-    spawner.must_spawn(draw_line(right_display));
+    shared_display.launch_app(line_app, right_rect).await;
 
     let left_rect = Rectangle::new(Point::new(0, 0), Size::new(64, 64));
-    let left_display = shared_display.new_partition(left_rect).await.unwrap();
-    spawner.must_spawn(print_hello(left_display));
+    shared_display.launch_app(text_app, left_rect).await;
 
     shared_display
         .flush_loop(async |d| {
