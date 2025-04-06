@@ -91,7 +91,7 @@ async fn main(spawner: Spawner) {
     shared_display
         .launch_new_app(
             spawner_ref,
-            move |disp| recursive_split_app(1, spawner_ref, disp),
+            move |disp| recursive_split_app(2, spawner_ref, disp),
             left_rect,
         )
         .await
@@ -99,7 +99,7 @@ async fn main(spawner: Spawner) {
     shared_display
         .launch_new_app(
             spawner_ref,
-            move |disp| recursive_split_app(0, spawner_ref, disp),
+            move |disp| recursive_split_app(1, spawner_ref, disp),
             right_rect,
         )
         .await
