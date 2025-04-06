@@ -7,9 +7,9 @@ use embedded_graphics::{
     primitives::{PrimitiveStyle, Rectangle},
     Pixel,
 };
-use shared_display::sharable_display::SharableBufferedDisplay;
+use shared_display::sharable_display::{PartitioningError, SharableBufferedDisplay};
 
-const DISP_WIDTH: usize = 12;
+const DISP_WIDTH: usize = 16;
 const DISP_HEIGHT: usize = 2;
 const NUM_PIXELS: usize = DISP_WIDTH * DISP_HEIGHT;
 
@@ -83,50 +83,52 @@ impl SharableBufferedDisplay for FakeDisplay {
 }
 
 #[tokio::test]
-async fn simple_split_clear() -> Result<(), Infallible> {
+async fn simple_split_clear() -> Result<(), PartitioningError> {
     let buffer = [0; NUM_PIXELS];
     let mut d = FakeDisplay { buffer };
     assert_eq!(*d.flush(), [0; NUM_PIXELS]);
 
-    d.clear(BinaryColor::On).await?;
+    d.clear(BinaryColor::On).await.unwrap();
     assert_eq!(*d.flush(), [1; NUM_PIXELS]);
 
-    let (mut left_display, mut right_display) = d.split_buffer_vertically();
+    let (mut left_display, mut right_display) = d.split_buffer_vertically().unwrap();
 
-    left_display.clear(BinaryColor::Off).await?;
-    let expected = string_to_buffer(String::from("00000000 1111 00000000 1111"));
+    left_display.clear(BinaryColor::Off).await.unwrap();
+    let expected = string_to_buffer(String::from("00000000 11111111 00000000 11111111"));
     assert_eq!(expected, *d.flush());
 
-    d.clear(BinaryColor::On).await?;
+    d.clear(BinaryColor::On).await.unwrap();
     assert_eq!(*d.flush(), [1; NUM_PIXELS]);
 
-    right_display.clear(BinaryColor::Off).await?;
-    let expected = string_to_buffer(String::from("11111111 0000 11111111 0000"));
+    right_display.clear(BinaryColor::Off).await.unwrap();
+    let expected = string_to_buffer(String::from("11111111 00000000 11111111 00000000"));
     assert_eq!(expected, *d.flush());
 
     Ok(())
 }
 
 #[tokio::test]
-async fn simple_split_draw_iter() -> Result<(), Infallible> {
+async fn simple_split_draw_iter() -> Result<(), PartitioningError> {
     let buffer = [0; NUM_PIXELS];
     let mut d = FakeDisplay { buffer };
     assert_eq!(*d.flush(), [0; NUM_PIXELS]);
 
-    let (mut left_display, mut right_display) = d.split_buffer_vertically();
+    let (mut left_display, mut right_display) = d.split_buffer_vertically()?;
 
     let rect = Rectangle::new(Point::new(0, 0), Size::new(2, 2));
     rect.into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
         .draw(&mut right_display)
-        .await?;
-    let expected = string_to_buffer(String::from("00000000 1100 00000000 1100"));
+        .await
+        .unwrap();
+    let expected = string_to_buffer(String::from("00000000 11000000 00000000 11000000"));
     assert_eq!(expected, *d.flush());
 
     let rect = Rectangle::new(Point::new(0, 0), Size::new(5, 2));
     rect.into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
         .draw(&mut left_display)
-        .await?;
-    let expected = string_to_buffer(String::from("11111000 1100 11111000 1100"));
+        .await
+        .unwrap();
+    let expected = string_to_buffer(String::from("11111000 11000000 11111000 11000000"));
     assert_eq!(expected, *d.flush());
 
     Ok(())

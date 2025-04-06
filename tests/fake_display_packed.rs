@@ -7,7 +7,7 @@ use embedded_graphics::{
     primitives::{PrimitiveStyle, Rectangle},
     Pixel,
 };
-use shared_display::sharable_display::SharableBufferedDisplay;
+use shared_display::sharable_display::{PartitioningError, SharableBufferedDisplay};
 
 const DISP_WIDTH: usize = 16;
 const DISP_HEIGHT: usize = 2;
@@ -82,46 +82,48 @@ impl SharableBufferedDisplay for FakePackedDisplay {
 }
 
 #[tokio::test]
-async fn simple_split_clear() -> Result<(), Infallible> {
+async fn simple_split_clear() -> Result<(), PartitioningError> {
     let buffer = [0; BUFFER_LEN];
     let mut d = FakePackedDisplay { buffer };
     assert_eq!(*d.flush(), [0; BUFFER_LEN]);
 
-    d.clear(BinaryColor::On).await?;
-    //assert_eq!(*d.flush(), [255, 255, 255, 255]);
-
-    let (mut left_display, mut right_display) = d.split_buffer_vertically();
-
-    left_display.clear(BinaryColor::Off).await?;
-    assert_eq!(*d.flush(), [0, 255, 0, 255]);
-
-    left_display.clear(BinaryColor::On).await?;
+    d.clear(BinaryColor::On).await.unwrap();
     assert_eq!(*d.flush(), [255, 255, 255, 255]);
 
-    right_display.clear(BinaryColor::Off).await?;
+    let (mut left_display, mut right_display) = d.split_buffer_vertically()?;
+
+    left_display.clear(BinaryColor::Off).await.unwrap();
+    assert_eq!(*d.flush(), [0, 255, 0, 255]);
+
+    left_display.clear(BinaryColor::On).await.unwrap();
+    assert_eq!(*d.flush(), [255, 255, 255, 255]);
+
+    right_display.clear(BinaryColor::Off).await.unwrap();
     assert_eq!(*d.flush(), [255, 0, 255, 0]);
 
     Ok(())
 }
 
 #[tokio::test]
-async fn simple_split_draw_iter() -> Result<(), Infallible> {
+async fn simple_split_draw_iter() -> Result<(), PartitioningError> {
     let buffer = [0; BUFFER_LEN];
     let mut d = FakePackedDisplay { buffer };
     assert_eq!(*d.flush(), [0; BUFFER_LEN]);
 
-    let (mut left_display, mut right_display) = d.split_buffer_vertically();
+    let (mut left_display, mut right_display) = d.split_buffer_vertically()?;
 
     let rect = Rectangle::new(Point::new(0, 0), Size::new(4, 2));
     rect.into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
         .draw(&mut left_display)
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(*d.flush(), [0b11110000, 0, 0b11110000, 0]);
 
     let rect = Rectangle::new(Point::new(0, 0), Size::new(5, 2));
     rect.into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
         .draw(&mut right_display)
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(*d.flush(), [0b11110000, 0b11111000, 0b11110000, 0b11111000]);
 
     Ok(())
