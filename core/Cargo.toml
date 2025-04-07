@@ -1,0 +1,7 @@
+[package]
+name = "shared-display-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embedded-graphics = { version = "0.8.1", default-features = false, features = ["async_draw"] } 

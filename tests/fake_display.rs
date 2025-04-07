@@ -1,13 +1,13 @@
 use core::convert::Infallible;
 use embedded_graphics::{
+    Pixel,
     draw_target::DrawTarget,
     geometry::Point,
     pixelcolor::BinaryColor,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
-    Pixel,
 };
-use shared_display::sharable_display::{PartitioningError, SharableBufferedDisplay};
+use shared_display_core::{PartitioningError, SharableBufferedDisplay};
 
 const DISP_WIDTH: usize = 16;
 const DISP_HEIGHT: usize = 2;

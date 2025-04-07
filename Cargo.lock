@@ -254,7 +254,7 @@ dependencies = [
 [[package]]
 name = "embedded-graphics-simulator"
 version = "0.7.0"
-source = "git+https://github.com/paulmoseskailer/simulator.git#b1c268399dcb1e6317a6af7455f9d0dea6145bf0"
+source = "git+https://github.com/paulmoseskailer/simulator.git#f9a56f8bfae6881cec0735bd772ba1477ad13f87"
 dependencies = [
  "base64",
  "embedded-graphics",
@@ -686,8 +686,16 @@ dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
  "heapless",
+ "shared-display-core",
  "static_cell",
  "tokio",
+]
+
+[[package]]
+name = "shared-display-core"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics",
 ]
 
 [[package]]

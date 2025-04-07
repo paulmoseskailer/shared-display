@@ -18,3 +18,7 @@ cargo run --example hello_world
 - [ ] `SharableNoBufferDisplay` Trait
 - [ ] integrate buffer compression
 - [ ] submit PRs for dependencies: `embedded-graphics`, `simulator`
+
+## Some Notes on Design Decisions
+
+- `core` is a sub-crate because the toolkit uses nightly Rust and drivers need to implement the `SharableBufferedDisplay`/`SharableNoBufferDisplay` Trait. They should be able to do so without switching to nightly.

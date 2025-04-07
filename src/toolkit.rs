@@ -8,7 +8,7 @@ use embedded_graphics::{
     primitives::Rectangle,
 };
 
-use crate::sharable_display::{DisplayPartition, PartitioningError, SharableBufferedDisplay};
+use shared_display_core::{DisplayPartition, PartitioningError, SharableBufferedDisplay};
 
 const MAX_APPS: usize = 8;
 pub static EVENTS: Channel<CriticalSectionRawMutex, ResizeEvent, MAX_APPS> = Channel::new();

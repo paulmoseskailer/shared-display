@@ -2,7 +2,7 @@ use embassy_executor::Spawner;
 use embassy_time::{Instant, Timer};
 use embedded_graphics::{
     geometry::Size,
-    mono_font::{ascii::FONT_10X20, MonoTextStyle},
+    mono_font::{MonoTextStyle, ascii::FONT_10X20},
     pixelcolor::BinaryColor,
     prelude::*,
     primitives::{Line, PrimitiveStyle, Rectangle, StyledDrawable},
@@ -11,10 +11,8 @@ use embedded_graphics::{
 use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
-use shared_display::{
-    sharable_display::DisplayPartition,
-    toolkit::{self, FlushResult, SharedDisplay},
-};
+use shared_display::toolkit::{self, FlushResult, SharedDisplay};
+use shared_display_core::DisplayPartition;
 use static_cell::StaticCell;
 
 type DisplayType = SimulatorDisplay<BinaryColor>;
@@ -84,8 +82,10 @@ async fn line_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> ()
 
         match toolkit::EVENTS.try_receive() {
             Err(_) => continue,
-            Ok(event) => display.react_to_resize(event),
-        }
+            Ok(event) => match event {
+                toolkit::ResizeEvent::AppClosed(area) => display.envelope(&area),
+            },
+        };
     }
 }
 

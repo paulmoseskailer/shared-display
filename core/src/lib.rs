@@ -1,12 +1,13 @@
+#![no_std]
+#![allow(async_fn_in_trait)]
+
 use embedded_graphics::{
+    Pixel,
     draw_target::DrawTarget,
     geometry::Point,
     prelude::{Dimensions, PixelColor, Size},
     primitives::Rectangle,
-    Pixel,
 };
-
-use crate::toolkit::ResizeEvent;
 
 #[derive(Debug)]
 pub enum PartitioningError {
@@ -92,11 +93,8 @@ where
         ))
     }
 
-    pub fn react_to_resize(&mut self, event: ResizeEvent) {
-        match event {
-            // TODO: this is bad, can't guarantee that enveloping is the right move
-            ResizeEvent::AppClosed(rect) => self.area = self.area.envelope(&rect),
-        }
+    pub fn envelope(&mut self, other: &Rectangle) {
+        self.area = self.area.envelope(other);
     }
 }
 
@@ -177,7 +175,7 @@ where
 
     async fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
-        I: IntoIterator<Item = Pixel<Self::Color>>,
+        I: ::core::iter::IntoIterator<Item = Pixel<Self::Color>>,
     {
         let whole_buffer: &mut [B] =
             // Safety: we check that every index is within our owned slice
