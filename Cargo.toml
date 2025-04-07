@@ -7,7 +7,7 @@ edition = "2024"
 members = ["core"]
 
 [dependencies]
-shared-display-core = { path = "core", version = "0.1.0", default-features = false }
+shared-display-core = { git = "https://github.com/paulmoseskailer/shared-display.git", branch = "restructure", version = "0.1.0", default-features = false }
 embassy-sync = "0.6.2"
 embedded-graphics = { version = "0.8.1", default-features = false, features = ["async_draw"] } 
 heapless = "0.8.0"
@@ -17,7 +17,7 @@ embassy-executor = {version = "0.7.0"}
 [dev-dependencies]
 tokio = {version = "1.44.0", features = ["full"]}
 # for examples
-embedded-graphics-simulator = { git = "https://github.com/paulmoseskailer/simulator.git", version = "0.7.0", default-features=false, features = ["with-sdl", "async_draw"]}
+embedded-graphics-simulator = { git = "https://github.com/paulmoseskailer/simulator.git", branch = "restructured-shared-disp", version = "0.7.0", default-features=false, features = ["with-sdl", "async_draw"]}
 embassy-time = {version = "0.4.0", features = ["std"]}
 embassy-sync = {version = "0.6.2", features = ["std"]}
 embassy-executor = {version = "0.7.0", features = ["arch-std", "executor-thread"]}
@@ -26,6 +26,3 @@ static_cell = "2.1.0"
 [patch.crates-io]
 embedded-graphics = {git = "https://github.com/paulmoseskailer/embedded-graphics.git"}
 embedded-graphics-core = { git = "https://github.com/paulmoseskailer/embedded-graphics.git" }
-
-[patch."https://github.com/paulmoseskailer/shared-display.git"]
-shared-display = { path = "." }

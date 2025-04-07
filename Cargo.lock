@@ -254,7 +254,7 @@ dependencies = [
 [[package]]
 name = "embedded-graphics-simulator"
 version = "0.7.0"
-source = "git+https://github.com/paulmoseskailer/simulator.git#f9a56f8bfae6881cec0735bd772ba1477ad13f87"
+source = "git+https://github.com/paulmoseskailer/simulator.git?branch=restructured-shared-disp#e5fd774420c14fe2bd538c25561bb73219472ac5"
 dependencies = [
  "base64",
  "embedded-graphics",
@@ -262,7 +262,7 @@ dependencies = [
  "maybe-async",
  "ouroboros",
  "sdl2",
- "shared-display",
+ "shared-display-core 0.1.0 (git+https://github.com/paulmoseskailer/shared-display.git?branch=restructure)",
 ]
 
 [[package]]
@@ -686,7 +686,7 @@ dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
  "heapless",
- "shared-display-core",
+ "shared-display-core 0.1.0 (git+https://github.com/paulmoseskailer/shared-display.git?branch=restructure)",
  "static_cell",
  "tokio",
 ]
@@ -694,6 +694,14 @@ dependencies = [
 [[package]]
 name = "shared-display-core"
 version = "0.1.0"
+dependencies = [
+ "embedded-graphics",
+]
+
+[[package]]
+name = "shared-display-core"
+version = "0.1.0"
+source = "git+https://github.com/paulmoseskailer/shared-display.git?branch=restructure#32522fe703964ebb504afb1ecbea22263996d049"
 dependencies = [
  "embedded-graphics",
 ]
