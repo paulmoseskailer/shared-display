@@ -69,7 +69,7 @@ where
 
         let pixels_per_buffer_el =
             (self.parent_size.width * self.parent_size.height) as usize / self.buffer_len;
-        if self.parent_size.width % pixels_per_buffer_el as u32 != 0 {
+        if pixels_per_buffer_el > 0 && self.parent_size.width % pixels_per_buffer_el as u32 != 0 {
             return Err(PartitioningError::BufferPixelMismatch);
         }
 
@@ -136,7 +136,7 @@ pub trait SharableBufferedDisplay: DrawTarget {
         let parent_size = self.bounding_box().size;
         let buffer_len = self.get_buffer().len();
         let pixels_per_buffer_el = (parent_size.width * parent_size.height) as usize / buffer_len;
-        if parent_size.width % pixels_per_buffer_el as u32 != 0 {
+        if pixels_per_buffer_el > 0 && parent_size.width % pixels_per_buffer_el as u32 != 0 {
             return Err(PartitioningError::BufferPixelMismatch);
         }
 
