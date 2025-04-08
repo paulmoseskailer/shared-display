@@ -1,3 +1,5 @@
+extern crate alloc;
+use alloc::boxed::Box;
 use core::future::Future;
 use core::pin::Pin;
 use embassy_executor::Spawner;
