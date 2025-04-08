@@ -119,7 +119,11 @@ pub trait SharableBufferedDisplay: DrawTarget {
 
     fn calculate_buffer_index(point: Point, parent_size: Size) -> PixelInBuffer;
 
-    fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>);
+    fn set_ith_buffer_element_for_pixel(
+        buffer: &mut Self::BufferElement,
+        pixel: Pixel<Self::Color>,
+        i: usize,
+    );
 
     fn new_partition(
         &mut self,
@@ -196,7 +200,11 @@ where
                         let index = buffer_index.start_index + offset;
                         // TODO maybe panic if index out of range? seems like a severe error
                         if index < self.buffer_len {
-                            D::set_pixel(&mut whole_buffer[index], p);
+                            D::set_ith_buffer_element_for_pixel(
+                                &mut whole_buffer[index],
+                                p,
+                                offset,
+                            );
                         }
                     }
                 }
