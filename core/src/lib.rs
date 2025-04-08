@@ -107,12 +107,17 @@ where
     }
 }
 
+pub struct PixelInBuffer {
+    pub start_index: usize,
+    pub width_in_buffer_elements: usize,
+}
+
 pub trait SharableBufferedDisplay: DrawTarget {
     type BufferElement;
 
     fn get_buffer(&mut self) -> &mut [Self::BufferElement];
 
-    fn calculate_buffer_index(point: Point, parent_size: Size) -> usize;
+    fn calculate_buffer_index(point: Point, parent_size: Size) -> PixelInBuffer;
 
     fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>);
 
@@ -187,7 +192,13 @@ where
             .for_each(|p| {
                 let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
                 if self.contains(p.0) {
-                    D::set_pixel(&mut whole_buffer[buffer_index], p);
+                    for offset in 0..(buffer_index.width_in_buffer_elements) {
+                        let index = buffer_index.start_index + offset;
+                        // TODO maybe panic if index out of range? seems like a severe error
+                        if index < self.buffer_len {
+                            D::set_pixel(&mut whole_buffer[index], p);
+                        }
+                    }
                 }
             });
         Ok(())

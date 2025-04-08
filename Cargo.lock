@@ -686,7 +686,7 @@ dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
  "heapless",
- "shared-display-core 0.1.0 (git+https://github.com/paulmoseskailer/shared-display.git)",
+ "shared-display-core 0.1.0 (git+https://github.com/paulmoseskailer/shared-display.git?branch=16-bit-color-support)",
  "static_cell",
  "tokio",
 ]
@@ -701,7 +701,15 @@ dependencies = [
 [[package]]
 name = "shared-display-core"
 version = "0.1.0"
-source = "git+https://github.com/paulmoseskailer/shared-display.git#584e7964d95190a50a7b3d37f8b3a3f44df131a2"
+source = "git+https://github.com/paulmoseskailer/shared-display.git?branch=16-bit-color-support#d65f45798d72ae63e10e3c9bc05d03354d7c8b31"
+dependencies = [
+ "embedded-graphics",
+]
+
+[[package]]
+name = "shared-display-core"
+version = "0.1.0"
+source = "git+https://github.com/paulmoseskailer/shared-display.git#35792b2a8404773b5d52ff1d924ef2578fe93f76"
 dependencies = [
  "embedded-graphics",
 ]
