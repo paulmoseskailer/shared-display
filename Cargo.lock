@@ -471,9 +471,9 @@ checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
 
 [[package]]
 name = "miniz_oxide"
-version = "0.8.7"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff70ce3e48ae43fa075863cef62e8b43b71a4f2382229920e0df362592919430"
+checksum = "3be647b768db090acb35d5ec5db2b0e1f1de11133ca123b9eacf5137868f892a"
 dependencies = [
  "adler2",
  "simd-adler32",
@@ -701,7 +701,7 @@ dependencies = [
 [[package]]
 name = "shared-display-core"
 version = "0.1.0"
-source = "git+https://github.com/paulmoseskailer/shared-display.git#584e7964d95190a50a7b3d37f8b3a3f44df131a2"
+source = "git+https://github.com/paulmoseskailer/shared-display.git#35792b2a8404773b5d52ff1d924ef2578fe93f76"
 dependencies = [
  "embedded-graphics",
 ]
