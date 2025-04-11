@@ -9,11 +9,13 @@ use embedded_graphics::{
     geometry::{Point, Size},
     primitives::Rectangle,
 };
+use static_cell::StaticCell;
 
 use shared_display_core::{DisplayPartition, PartitioningError, SharableBufferedDisplay};
 
 const MAX_APPS: usize = 8;
 pub static EVENTS: Channel<CriticalSectionRawMutex, ResizeEvent, MAX_APPS> = Channel::new();
+static SPAWNER: StaticCell<Spawner> = StaticCell::new();
 
 pub enum AppStart {
     Success,
@@ -32,16 +34,20 @@ pub enum ResizeEvent {
 pub struct SharedDisplay<D: SharableBufferedDisplay> {
     pub real_display: Mutex<CriticalSectionRawMutex, D>,
     partition_areas: heapless::Vec<Rectangle, MAX_APPS>,
+
+    spawner: &'static Spawner,
 }
 
 impl<B, D> SharedDisplay<D>
 where
     D: SharableBufferedDisplay<BufferElement = B>,
 {
-    pub async fn new(real_display: D) -> Self {
+    pub async fn new(real_display: D, spawner: Spawner) -> Self {
+        let spawner_ref: &'static Spawner = SPAWNER.init(spawner);
         SharedDisplay {
             real_display: Mutex::new(real_display),
             partition_areas: heapless::Vec::new(),
+            spawner: spawner_ref,
         }
     }
 
@@ -121,7 +127,6 @@ where
 
     pub async fn launch_new_app<F>(
         &mut self,
-        spawner: &'static Spawner,
         mut app_fn: F,
         area: Rectangle,
     ) -> Result<(), PartitioningError>
@@ -132,7 +137,26 @@ where
         let partition = self.new_partition(area).await?;
 
         let fut = app_fn(partition);
-        spawner.must_spawn(launch_future(Box::pin(fut), area.clone()));
+        self.spawner
+            .must_spawn(launch_future(Box::pin(fut), area.clone()));
+
+        Ok(())
+    }
+
+    pub async fn launch_new_recursive_app<F>(
+        &mut self,
+        mut app_fn: F,
+        area: Rectangle,
+    ) -> Result<(), PartitioningError>
+    where
+        F: AsyncFnMut(DisplayPartition<B, D>, &'static Spawner) -> (),
+        for<'b> F::CallRefFuture<'b>: 'static,
+    {
+        let partition = self.new_partition(area).await?;
+
+        let fut = app_fn(partition, self.spawner);
+        self.spawner
+            .must_spawn(launch_future(Box::pin(fut), area.clone()));
 
         Ok(())
     }
@@ -160,7 +184,7 @@ async fn launch_future(app_future: Pin<Box<dyn Future<Output = ()>>>, area: Rect
     EVENTS.send(ResizeEvent::AppClosed(area)).await;
 }
 
-pub async fn launch_inside_app<F, B, D>(
+pub async fn launch_app_in_app<F, B, D>(
     spawner: &'static Spawner,
     mut app_fn: F,
     partition: DisplayPartition<B, D>,

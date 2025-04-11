@@ -2,7 +2,7 @@
 
 Enabling concurrent screen-sharing applications with embedded Rust.
 
-## How to Run
+## How to Use
 
 See `examples` folder.
 
@@ -15,9 +15,8 @@ cargo run --example hello_world
 - [x] `SharableBufferedDisplay` Trait
 - [x] basic toolkit functionality for easy development
 - [ ] handle resizing of partitions at runtime
-- [ ] `SharableNoBufferDisplay` Trait
 - [ ] integrate buffer compression
-- [ ] submit PRs for dependencies: `embedded-graphics`, `simulator`
+- [ ] submit PRs for dependencies: `embedded-graphics`, `simulator`(, `ssd1351`)
 
 ## Some Notes on Design Decisions
 
