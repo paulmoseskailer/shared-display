@@ -11,10 +11,13 @@ use embedded_graphics::{
 };
 use static_cell::StaticCell;
 
-use shared_display_core::{DisplayPartition, PartitioningError, SharableBufferedDisplay};
+use shared_display_core::{
+    DisplayPartition, DrawTracker, PartitioningError, SharableBufferedDisplay,
+};
 
 const MAX_APPS: usize = 8;
-pub static EVENTS: Channel<CriticalSectionRawMutex, ResizeEvent, MAX_APPS> = Channel::new();
+const EVENT_QUEUE_SIZE: usize = MAX_APPS;
+pub static EVENTS: Channel<CriticalSectionRawMutex, ResizeEvent, EVENT_QUEUE_SIZE> = Channel::new();
 static SPAWNER: StaticCell<Spawner> = StaticCell::new();
 
 pub enum AppStart {
@@ -34,6 +37,7 @@ pub enum ResizeEvent {
 pub struct SharedDisplay<D: SharableBufferedDisplay> {
     pub real_display: Mutex<CriticalSectionRawMutex, D>,
     partition_areas: heapless::Vec<Rectangle, MAX_APPS>,
+    draw_trackers: heapless::Vec<&'static DrawTracker, MAX_APPS>,
 
     spawner: &'static Spawner,
 }
@@ -47,6 +51,7 @@ where
         SharedDisplay {
             real_display: Mutex::new(real_display),
             partition_areas: heapless::Vec::new(),
+            draw_trackers: heapless::Vec::new(),
             spawner: spawner_ref,
         }
     }
@@ -72,10 +77,12 @@ where
             }
         }
 
-        let result = real_display.new_partition(area);
+        static DRAW_TRACKER: DrawTracker = DrawTracker::new();
+        let result = real_display.new_partition(area, &DRAW_TRACKER);
 
         if result.is_ok() {
             self.partition_areas.push(area.clone()).unwrap();
+            _ = self.draw_trackers.push(&DRAW_TRACKER);
         }
 
         result
@@ -84,10 +91,20 @@ where
     pub async fn split_vertically(
         &mut self,
     ) -> Result<(DisplayPartition<B, D>, DisplayPartition<B, D>), PartitioningError> {
-        let (left_partition, right_partition) =
-            self.real_display.lock().await.split_buffer_vertically()?;
-        self.partition_areas.push(left_partition.area).unwrap();
-        self.partition_areas.push(right_partition.area).unwrap();
+        let total_area = self.real_display.lock().await.bounding_box();
+        let half_size = Size::new(total_area.size.width / 2, total_area.size.height);
+        let left_area = Rectangle::new(total_area.top_left, half_size);
+        let right_area = Rectangle::new(
+            Point::new(
+                total_area.top_left.x + half_size.width as i32,
+                total_area.top_left.y,
+            ),
+            half_size,
+        );
+
+        let left_partition = self.new_partition(left_area).await?;
+        let right_partition = self.new_partition(right_area).await?;
+
         Ok((left_partition, right_partition))
     }
 
@@ -166,6 +183,11 @@ where
         F: AsyncFnMut(&mut D) -> FlushResult,
     {
         loop {
+            // TODO: only flush if any partition has updates
+            for &draw_tracker in self.draw_trackers.iter() {
+                let area = draw_tracker.dirty_area.lock().await.size;
+                println!("draw_tracker has size {}x{}", area.width, area.height);
+            }
             match flush(&mut *self.real_display.lock().await).await {
                 FlushResult::Continue => {}
                 FlushResult::Abort => {
@@ -198,33 +220,4 @@ where
     spawner.must_spawn(launch_future(Box::pin(fut), area));
 
     return AppStart::Success;
-}
-
-pub async fn flush_loop<F, D>(
-    shared_display_mutex: &Mutex<CriticalSectionRawMutex, Option<SharedDisplay<D>>>,
-    mut flush: F,
-) where
-    D: SharableBufferedDisplay,
-    F: AsyncFnMut(&mut D) -> FlushResult,
-{
-    loop {
-        match flush(
-            &mut *shared_display_mutex
-                .lock()
-                .await
-                .as_mut()
-                .unwrap()
-                .real_display
-                .lock()
-                .await,
-        )
-        .await
-        {
-            FlushResult::Continue => {}
-            FlushResult::Abort => {
-                break;
-            }
-        }
-        Timer::after_millis(200).await;
-    }
 }
