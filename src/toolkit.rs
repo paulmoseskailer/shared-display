@@ -185,9 +185,11 @@ where
         loop {
             // TODO: only flush if any partition has updates
             for &draw_tracker in self.draw_trackers.iter() {
-                let area = draw_tracker.dirty_area.lock().await.size;
-                println!("draw_tracker has size {}x{}", area.width, area.height);
+                if let Some(area) = draw_tracker.take_dirty_area().await {
+                    println!("draw_tracker has area {:?}", area);
+                }
             }
+            println!("");
             match flush(&mut *self.real_display.lock().await).await {
                 FlushResult::Continue => {}
                 FlushResult::Abort => {

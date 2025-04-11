@@ -38,6 +38,17 @@ impl DrawTracker {
             dirty_area: Mutex::new(Rectangle::new_at_origin(Size::new_equal(0))),
         }
     }
+
+    pub async fn take_dirty_area(&self) -> Option<Rectangle> {
+        if self.is_dirty.swap(false, Ordering::Acquire) {
+            let mut guard = self.dirty_area.lock().await;
+            let result = guard.clone();
+            *guard = Rectangle::new_at_origin(Size::new_equal(0));
+            Some(result)
+        } else {
+            None
+        }
+    }
 }
 
 pub struct DisplayPartition<B, D: ?Sized> {
