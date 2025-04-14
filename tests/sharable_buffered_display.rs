@@ -7,8 +7,7 @@ use embedded_graphics::{
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
 };
-use shared_display::DrawTracker;
-use shared_display_core::{PartitioningError, SharableBufferedDisplay};
+use shared_display_core::{DrawTracker, PartitioningError, SharableBufferedDisplay};
 
 const DISP_WIDTH: usize = 16;
 const DISP_HEIGHT: usize = 2;
@@ -97,7 +96,7 @@ async fn simple_split_clear() -> Result<(), PartitioningError> {
     let left_area = Rectangle::new(Point::new(0, 0), Size::new(8, 2));
     let mut left_display = d.new_partition(left_area, &DRAW_TRACKERS[0]).unwrap();
     let right_area = Rectangle::new(Point::new(8, 0), Size::new(8, 2));
-    let mut right_display = d.new_partition(right_area, &DRAW_TRACKERS[0]).unwrap();
+    let mut right_display = d.new_partition(right_area, &DRAW_TRACKERS[1]).unwrap();
 
     left_display.clear(BinaryColor::Off).await.unwrap();
     let expected = string_to_buffer(String::from("00000000 11111111 00000000 11111111"));
@@ -122,7 +121,7 @@ async fn simple_split_draw_iter() -> Result<(), PartitioningError> {
     let left_area = Rectangle::new(Point::new(0, 0), Size::new(8, 2));
     let mut left_display = d.new_partition(left_area, &DRAW_TRACKERS[0]).unwrap();
     let right_area = Rectangle::new(Point::new(8, 0), Size::new(8, 2));
-    let mut right_display = d.new_partition(right_area, &DRAW_TRACKERS[0]).unwrap();
+    let mut right_display = d.new_partition(right_area, &DRAW_TRACKERS[1]).unwrap();
 
     let rect = Rectangle::new(Point::new(0, 0), Size::new(2, 2));
     rect.into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
