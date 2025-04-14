@@ -28,22 +28,22 @@ pub enum PartitioningError {
 
 pub struct DrawTracker {
     is_dirty: AtomicBool,
-    pub dirty_area: Mutex<CriticalSectionRawMutex, Rectangle>,
+    pub dirty_area: Mutex<CriticalSectionRawMutex, Option<Rectangle>>,
 }
 
 impl DrawTracker {
     pub const fn new() -> Self {
         Self {
             is_dirty: AtomicBool::new(false),
-            dirty_area: Mutex::new(Rectangle::new_at_origin(Size::new_equal(0))),
+            dirty_area: Mutex::new(None),
         }
     }
 
     pub async fn take_dirty_area(&self) -> Option<Rectangle> {
         if self.is_dirty.swap(false, Ordering::Acquire) {
             let mut guard = self.dirty_area.lock().await;
-            let result = guard.clone();
-            *guard = Rectangle::new_at_origin(Size::new_equal(0));
+            let result = guard.clone().unwrap();
+            *guard = None;
             Some(result)
         } else {
             None
@@ -200,7 +200,7 @@ where
     where
         I: ::core::iter::IntoIterator<Item = Pixel<Self::Color>>,
     {
-        let mut dirty_area: Option<Rectangle> = None;
+        let mut dirty_area: Option<Rectangle> = self.draw_tracker.dirty_area.lock().await.clone();
         let whole_buffer: &mut [B] =
             // Safety: we check that every index is within our owned slice
             unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) };
@@ -224,7 +224,7 @@ where
         if let Some(dirty_area) = dirty_area {
             self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
             let mut guard = self.draw_tracker.dirty_area.lock().await;
-            *guard = (*guard).envelope(&dirty_area);
+            *guard = Some(dirty_area);
         }
         Ok(())
     }
@@ -233,7 +233,7 @@ where
     // draw_iter adds it again
     async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
-        *self.draw_tracker.dirty_area.lock().await = self.area;
+        *self.draw_tracker.dirty_area.lock().await = Some(self.area);
 
         self.fill_solid(&(Rectangle::new(Point::new(0, 0), self.area.size)), color)
             .await

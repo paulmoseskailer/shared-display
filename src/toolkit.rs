@@ -19,6 +19,7 @@ const MAX_APPS: usize = 8;
 const EVENT_QUEUE_SIZE: usize = MAX_APPS;
 pub static EVENTS: Channel<CriticalSectionRawMutex, ResizeEvent, EVENT_QUEUE_SIZE> = Channel::new();
 static SPAWNER: StaticCell<Spawner> = StaticCell::new();
+static DRAW_TRACKERS: [DrawTracker; MAX_APPS] = [const { DrawTracker::new() }; MAX_APPS];
 
 pub enum AppStart {
     Success,
@@ -37,7 +38,7 @@ pub enum ResizeEvent {
 pub struct SharedDisplay<D: SharableBufferedDisplay> {
     pub real_display: Mutex<CriticalSectionRawMutex, D>,
     partition_areas: heapless::Vec<Rectangle, MAX_APPS>,
-    draw_trackers: heapless::Vec<&'static DrawTracker, MAX_APPS>,
+    draw_trackers: &'static [DrawTracker; MAX_APPS],
 
     spawner: &'static Spawner,
 }
@@ -51,7 +52,7 @@ where
         SharedDisplay {
             real_display: Mutex::new(real_display),
             partition_areas: heapless::Vec::new(),
-            draw_trackers: heapless::Vec::new(),
+            draw_trackers: &DRAW_TRACKERS,
             spawner: spawner_ref,
         }
     }
@@ -77,12 +78,11 @@ where
             }
         }
 
-        static DRAW_TRACKER: DrawTracker = DrawTracker::new();
-        let result = real_display.new_partition(area, &DRAW_TRACKER);
+        let index = self.partition_areas.len();
+        let result = real_display.new_partition(area, &self.draw_trackers[index]);
 
         if result.is_ok() {
             self.partition_areas.push(area.clone()).unwrap();
-            _ = self.draw_trackers.push(&DRAW_TRACKER);
         }
 
         result
@@ -178,22 +178,19 @@ where
         Ok(())
     }
 
-    pub async fn flush_loop<F>(&self, mut flush: F)
+    pub async fn flush_loop<F>(&self, mut flush_area: F)
     where
-        F: AsyncFnMut(&mut D) -> FlushResult,
+        F: AsyncFnMut(&mut D, Rectangle) -> FlushResult,
     {
-        loop {
-            // TODO: only flush if any partition has updates
-            for &draw_tracker in self.draw_trackers.iter() {
+        'outer: loop {
+            for draw_tracker in self.draw_trackers.iter() {
                 if let Some(area) = draw_tracker.take_dirty_area().await {
-                    println!("draw_tracker has area {:?}", area);
-                }
-            }
-            println!("");
-            match flush(&mut *self.real_display.lock().await).await {
-                FlushResult::Continue => {}
-                FlushResult::Abort => {
-                    break;
+                    match flush_area(&mut *self.real_display.lock().await, area).await {
+                        FlushResult::Continue => {}
+                        FlushResult::Abort => {
+                            break 'outer;
+                        }
+                    }
                 }
             }
             Timer::after_millis(200).await;
