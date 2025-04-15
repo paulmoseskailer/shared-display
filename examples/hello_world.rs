@@ -75,7 +75,7 @@ async fn line_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> ()
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (display, mut window) = init_simulator_display();
-    let mut shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display, spawner).await;
+    let mut shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display, spawner);
 
     let right_rect = Rectangle::new(Point::new(64, 0), Size::new(64, 64));
     shared_display

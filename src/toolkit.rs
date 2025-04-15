@@ -47,7 +47,7 @@ impl<B, D> SharedDisplay<D>
 where
     D: SharableBufferedDisplay<BufferElement = B>,
 {
-    pub async fn new(real_display: D, spawner: Spawner) -> Self {
+    pub fn new(real_display: D, spawner: Spawner) -> Self {
         let spawner_ref: &'static Spawner = SPAWNER.init(spawner);
         SharedDisplay {
             real_display: Mutex::new(real_display),
@@ -57,7 +57,7 @@ where
         }
     }
 
-    pub async fn new_partition(
+    async fn new_partition(
         &mut self,
         area: Rectangle,
     ) -> Result<DisplayPartition<B, D>, PartitioningError> {

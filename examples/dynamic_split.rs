@@ -78,7 +78,7 @@ async fn recursive_split_app(
 async fn main(spawner: Spawner) {
     let (display, mut window) = init_simulator_display();
 
-    let mut shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display, spawner).await;
+    let mut shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display, spawner);
 
     let half_size = Size::new(64, 64);
     let left_rect = Rectangle::new(Point::new(0, 0), half_size);
