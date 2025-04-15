@@ -7,7 +7,7 @@ use embedded_graphics::{
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
 };
-use shared_display_core::{DrawTracker, PartitioningError, SharableBufferedDisplay};
+use shared_display_core::{AreaToFlush, DrawTracker, PartitioningError, SharableBufferedDisplay};
 
 const DISP_WIDTH: usize = 16;
 const DISP_HEIGHT: usize = 4;
@@ -80,22 +80,18 @@ async fn flush_dirty_only() -> Result<(), PartitioningError> {
     let mut right_display = d.new_partition(right_area, &DRAW_TRACKERS[1]).unwrap();
 
     left_display.clear(BinaryColor::Off).await.unwrap();
-    assert_eq!(
-        DRAW_TRACKERS[0].take_dirty_area().await.unwrap(),
-        Rectangle::new_at_origin(Size::new(8, 2))
-    );
-    assert_eq!(DRAW_TRACKERS[0].take_dirty_area().await, None);
+    assert_eq!(DRAW_TRACKERS[0].take_dirty_area().await, AreaToFlush::All,);
+    assert_eq!(DRAW_TRACKERS[0].take_dirty_area().await, AreaToFlush::None);
 
     let rect = Rectangle::new(Point::new(0, 0), Size::new(2, 2));
     rect.into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
         .draw(&mut right_display)
         .await
         .unwrap();
-    assert_eq!(
-        DRAW_TRACKERS[1].take_dirty_area().await.unwrap(),
-        Rectangle::new(right_partition_origin, Size::new(2, 2))
-    );
-    assert_eq!(DRAW_TRACKERS[1].take_dirty_area().await, None);
+    assert_eq!(DRAW_TRACKERS[1].take_dirty_area().await, AreaToFlush::All,);
+    assert_eq!(DRAW_TRACKERS[1].take_dirty_area().await, AreaToFlush::None);
+
+    //TODO: add test for AreaToFlush::Some(rect)
 
     Ok(())
 }
