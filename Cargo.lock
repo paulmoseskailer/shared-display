@@ -686,7 +686,7 @@ dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
  "heapless",
- "shared-display-core 0.1.0 (git+https://github.com/paulmoseskailer/shared-display.git?branch=only-flush-dirty)",
+ "shared-display-core 0.1.0 (git+https://github.com/paulmoseskailer/shared-display.git)",
  "static_cell",
  "tokio",
 ]
@@ -702,16 +702,7 @@ dependencies = [
 [[package]]
 name = "shared-display-core"
 version = "0.1.0"
-source = "git+https://github.com/paulmoseskailer/shared-display.git?branch=only-flush-dirty#567a976012b2d96e8c4df0b7961b85dae85210a3"
-dependencies = [
- "embassy-sync",
- "embedded-graphics",
-]
-
-[[package]]
-name = "shared-display-core"
-version = "0.1.0"
-source = "git+https://github.com/paulmoseskailer/shared-display.git#9b2b73d053b366e9986431b591c47140c64cd5b9"
+source = "git+https://github.com/paulmoseskailer/shared-display.git#ddbf43a324f49c33345ab999a2a5cef3fb8485a7"
 dependencies = [
  "embedded-graphics",
 ]
