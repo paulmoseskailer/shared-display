@@ -40,10 +40,11 @@ impl DrawTracker {
     }
 
     pub async fn take_dirty_area(&self) -> Option<Rectangle> {
-        if self.is_dirty.swap(false, Ordering::Acquire) {
+        if self.is_dirty.load(Ordering::Acquire) {
             let mut guard = self.dirty_area.lock().await;
             let result = guard.clone().unwrap();
             *guard = None;
+            self.is_dirty.store(false, Ordering::Release);
             Some(result)
         } else {
             None
