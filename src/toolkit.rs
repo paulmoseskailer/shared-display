@@ -4,7 +4,7 @@ use core::future::Future;
 use core::pin::Pin;
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
-use embassy_time::Timer;
+use embassy_time::{Duration, Timer};
 use embedded_graphics::{
     geometry::{Point, Size},
     primitives::Rectangle,
@@ -15,6 +15,7 @@ use shared_display_core::{
     DisplayPartition, DrawTracker, PartitioningError, SharableBufferedDisplay,
 };
 
+const FLUSH_INTERVAL: Duration = Duration::from_millis(20);
 const MAX_APPS: usize = 8;
 const EVENT_QUEUE_SIZE: usize = MAX_APPS;
 pub static EVENTS: Channel<CriticalSectionRawMutex, ResizeEvent, EVENT_QUEUE_SIZE> = Channel::new();
@@ -159,7 +160,7 @@ where
                     }
                 }
             }
-            Timer::after_millis(200).await;
+            Timer::after(FLUSH_INTERVAL).await;
         }
     }
 }
