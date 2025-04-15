@@ -234,7 +234,9 @@ where
     // draw_iter adds it again
     async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
-        *self.draw_tracker.dirty_area.lock().await = Some(self.area);
+        {
+            *self.draw_tracker.dirty_area.lock().await = Some(self.area);
+        }
 
         self.fill_solid(&(Rectangle::new(Point::new(0, 0), self.area.size)), color)
             .await
