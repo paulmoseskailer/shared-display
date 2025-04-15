@@ -13,11 +13,8 @@ use embedded_graphics_simulator::{
 };
 use shared_display::toolkit::{FlushResult, SharedDisplay};
 use shared_display_core::DisplayPartition;
-use static_cell::StaticCell;
 
 type DisplayType = SimulatorDisplay<BinaryColor>;
-
-static SPAWNER: StaticCell<Spawner> = StaticCell::new();
 
 fn init_simulator_display() -> (DisplayType, Window) {
     let output_settings = OutputSettingsBuilder::new()
@@ -77,25 +74,23 @@ async fn line_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> ()
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    let spawner = SPAWNER.init(spawner);
-
     let (display, mut window) = init_simulator_display();
-    let mut shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display).await;
+    let mut shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display, spawner);
 
     let right_rect = Rectangle::new(Point::new(64, 0), Size::new(64, 64));
     shared_display
-        .launch_new_app(spawner, line_app, right_rect)
+        .launch_new_app(line_app, right_rect)
         .await
         .unwrap();
 
     let left_rect = Rectangle::new(Point::new(0, 0), Size::new(64, 64));
     shared_display
-        .launch_new_app(spawner, text_app, left_rect)
+        .launch_new_app(text_app, left_rect)
         .await
         .unwrap();
 
     shared_display
-        .flush_loop(async |d| {
+        .flush_loop(async |d, _area| {
             window.update(d);
             if window.events().any(|e| e == SimulatorEvent::Quit) {
                 return FlushResult::Abort;

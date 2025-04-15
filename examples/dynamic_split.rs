@@ -9,12 +9,10 @@ use embedded_graphics::{
 use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
-use shared_display::toolkit::{FlushResult, SharedDisplay, launch_inside_app};
+use shared_display::toolkit::{FlushResult, SharedDisplay, launch_app_in_app};
 use shared_display_core::DisplayPartition;
-use static_cell::StaticCell;
 
 type DisplayType = SimulatorDisplay<BinaryColor>;
-static SPAWNER: StaticCell<Spawner> = StaticCell::new();
 
 fn init_simulator_display() -> (DisplayType, Window) {
     let output_settings = OutputSettingsBuilder::new()
@@ -28,8 +26,8 @@ fn init_simulator_display() -> (DisplayType, Window) {
 
 async fn recursive_split_app(
     recursion_level: u8,
-    spawner: &'static Spawner,
     mut display: DisplayPartition<BinaryColor, DisplayType>,
+    spawner: &'static Spawner,
 ) -> () {
     let max_x: i32 = (display.bounding_box().size.width - 1).try_into().unwrap();
     let max_y: i32 = (display.bounding_box().size.height - 1).try_into().unwrap();
@@ -62,15 +60,15 @@ async fn recursive_split_app(
     // recursive case
     let (left_display, right_display) = display.split_vertically().unwrap();
     let new_recursion_level = recursion_level - 1;
-    launch_inside_app(
+    launch_app_in_app(
         spawner,
-        move |d| recursive_split_app(new_recursion_level, spawner, d),
+        move |d| recursive_split_app(new_recursion_level, d, spawner),
         left_display,
     )
     .await;
-    launch_inside_app(
+    launch_app_in_app(
         spawner,
-        move |d| recursive_split_app(new_recursion_level, spawner, d),
+        move |d| recursive_split_app(new_recursion_level, d, spawner),
         right_display,
     )
     .await;
@@ -79,32 +77,29 @@ async fn recursive_split_app(
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (display, mut window) = init_simulator_display();
-    let spawner_ref: &'static Spawner = SPAWNER.init(spawner);
 
-    let mut shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display).await;
+    let mut shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display, spawner);
 
     let half_size = Size::new(64, 64);
     let left_rect = Rectangle::new(Point::new(0, 0), half_size);
     let right_rect = Rectangle::new(Point::new(64, 0), half_size);
     shared_display
-        .launch_new_app(
-            spawner_ref,
-            move |disp| recursive_split_app(2, spawner_ref, disp),
+        .launch_new_recursive_app(
+            move |disp, spawner| recursive_split_app(2, disp, spawner),
             left_rect,
         )
         .await
         .unwrap();
     shared_display
-        .launch_new_app(
-            spawner_ref,
-            move |disp| recursive_split_app(1, spawner_ref, disp),
+        .launch_new_recursive_app(
+            move |disp, spawner| recursive_split_app(1, disp, spawner),
             right_rect,
         )
         .await
         .unwrap();
 
     shared_display
-        .flush_loop(async |d| {
+        .flush_loop(async |d, _area| {
             window.update(d);
             if window.events().any(|e| e == SimulatorEvent::Quit) {
                 return FlushResult::Abort;

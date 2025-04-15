@@ -1,6 +1,9 @@
 #![no_std]
 #![allow(async_fn_in_trait)]
 
+use core::sync::atomic::{AtomicBool, Ordering};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embedded_graphics::prelude::ContainsPoint;
 use embedded_graphics::{
     Pixel,
     draw_target::DrawTarget,
@@ -23,12 +26,49 @@ pub enum PartitioningError {
     ExistingNotFound,
 }
 
+pub struct DrawTracker {
+    is_dirty: AtomicBool,
+    pub dirty_area: Mutex<CriticalSectionRawMutex, Option<Rectangle>>,
+}
+
+impl DrawTracker {
+    pub const fn new() -> Self {
+        Self {
+            is_dirty: AtomicBool::new(false),
+            dirty_area: Mutex::new(None),
+        }
+    }
+
+    pub async fn take_dirty_area(&self) -> Option<Rectangle> {
+        if self.is_dirty.swap(false, Ordering::Acquire) {
+            let mut guard = self.dirty_area.lock().await;
+            let result = guard.clone().unwrap();
+            *guard = None;
+            Some(result)
+        } else {
+            None
+        }
+    }
+}
+
 pub struct DisplayPartition<B, D: ?Sized> {
     pub buffer: *mut B,
     buffer_len: usize,
     pub parent_size: Size,
     pub area: Rectangle,
     _display: core::marker::PhantomData<D>,
+
+    draw_tracker: &'static DrawTracker,
+}
+
+impl<C, B, D> ContainsPoint for DisplayPartition<B, D>
+where
+    C: PixelColor,
+    D: SharableBufferedDisplay<BufferElement = B, Color = C> + ?Sized,
+{
+    fn contains(&self, p: Point) -> bool {
+        self.area.contains(p)
+    }
 }
 
 impl<C, B, D> DisplayPartition<B, D>
@@ -36,18 +76,20 @@ where
     C: PixelColor,
     D: SharableBufferedDisplay<BufferElement = B, Color = C> + ?Sized,
 {
-    pub fn new(buffer: &mut [B], parent_size: Size, area: Rectangle) -> DisplayPartition<B, D> {
+    pub fn new(
+        buffer: &mut [B],
+        parent_size: Size,
+        area: Rectangle,
+        draw_tracker: &'static DrawTracker,
+    ) -> DisplayPartition<B, D> {
         DisplayPartition {
             buffer: buffer.as_mut_ptr(),
             parent_size,
             buffer_len: buffer.len(),
             area,
             _display: core::marker::PhantomData,
+            draw_tracker,
         }
-    }
-
-    fn contains(&self, p: Point) -> bool {
-        self.area.contains(p)
     }
 
     pub fn split_vertically(
@@ -81,6 +123,7 @@ where
                 },
                 self.parent_size,
                 left_area,
+                self.draw_tracker,
             ),
             DisplayPartition::new(
                 unsafe {
@@ -89,6 +132,7 @@ where
                 },
                 self.parent_size,
                 right_area,
+                self.draw_tracker,
             ),
         ))
     }
@@ -119,6 +163,7 @@ pub trait SharableBufferedDisplay: DrawTarget {
     fn new_partition(
         &mut self,
         area: Rectangle,
+        draw_tracker: &'static DrawTracker,
     ) -> Result<DisplayPartition<Self::BufferElement, Self>, PartitioningError> {
         if area.size.width < 8 {
             return Err(PartitioningError::PartitionTooSmall);
@@ -135,34 +180,12 @@ pub trait SharableBufferedDisplay: DrawTarget {
             return Err(PartitioningError::PartitionBadWidth);
         }
 
-        Ok(DisplayPartition::new(self.get_buffer(), parent_size, area))
-    }
-
-    fn split_buffer_vertically(
-        &mut self,
-    ) -> Result<
-        (
-            DisplayPartition<Self::BufferElement, Self>,
-            DisplayPartition<Self::BufferElement, Self>,
-        ),
-        PartitioningError,
-    > {
-        let parent_size = self.bounding_box().size;
-
-        // ensure no bytes are split in half by rounding to a split of width multiple of 8
-        let left_area_width = (parent_size.width / 2) + 7 & !7;
-        let left_area = Rectangle::new(
-            self.bounding_box().top_left,
-            Size::new(left_area_width, parent_size.height),
-        );
-        let right_area = Rectangle::new(
-            self.bounding_box().top_left + Point::new(left_area_width.try_into().unwrap(), 0),
-            Size::new(parent_size.width - left_area_width, parent_size.height),
-        );
-
-        let left = self.new_partition(left_area)?;
-        let right = self.new_partition(right_area)?;
-        Ok((left, right))
+        Ok(DisplayPartition::new(
+            self.get_buffer(),
+            parent_size,
+            area,
+            draw_tracker,
+        ))
     }
 }
 
@@ -177,6 +200,7 @@ where
     where
         I: ::core::iter::IntoIterator<Item = Pixel<Self::Color>>,
     {
+        let mut dirty_area: Option<Rectangle> = self.draw_tracker.dirty_area.lock().await.clone();
         let whole_buffer: &mut [B] =
             // Safety: we check that every index is within our owned slice
             unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) };
@@ -188,14 +212,29 @@ where
                 let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
                 if self.contains(p.0) {
                     D::set_pixel(&mut whole_buffer[buffer_index], p);
+
+                    dirty_area = match dirty_area {
+                        None => Some(Rectangle::with_center(p.0, Size::default())),
+                        Some(previous_area) => Some(
+                            previous_area.envelope(&Rectangle::with_center(p.0, Size::default())),
+                        ),
+                    };
                 }
             });
+        if let Some(dirty_area) = dirty_area {
+            self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
+            let mut guard = self.draw_tracker.dirty_area.lock().await;
+            *guard = Some(dirty_area);
+        }
         Ok(())
     }
 
     // Make sure to remove the offset from the Rectangle to be cleared,
     // draw_iter adds it again
     async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
+        *self.draw_tracker.dirty_area.lock().await = Some(self.area);
+
         self.fill_solid(&(Rectangle::new(Point::new(0, 0), self.area.size)), color)
             .await
     }

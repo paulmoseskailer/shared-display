@@ -28,7 +28,7 @@ Examples on how to use the `SharedDisplay` (with the simulator) can be found in 
 - [ ] handle resizing of partitions at runtime
 - [ ] provide an elegant solution for non-buffered displays
 - [ ] integrate buffer compression
-- [ ] submit PRs for dependencies: `embedded-graphics`, `simulator`
+- [ ] submit PRs for dependencies: `embedded-graphics`, `simulator`(, `ssd1351`)
 
 ## Some Notes on Design Decisions
 
