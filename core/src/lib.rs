@@ -40,10 +40,11 @@ impl DrawTracker {
     }
 
     pub async fn take_dirty_area(&self) -> Option<Rectangle> {
-        if self.is_dirty.swap(false, Ordering::Acquire) {
+        if self.is_dirty.load(Ordering::Acquire) {
             let mut guard = self.dirty_area.lock().await;
             let result = guard.clone().unwrap();
             *guard = None;
+            self.is_dirty.store(false, Ordering::Release);
             Some(result)
         } else {
             None
@@ -233,7 +234,9 @@ where
     // draw_iter adds it again
     async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
-        *self.draw_tracker.dirty_area.lock().await = Some(self.area);
+        {
+            *self.draw_tracker.dirty_area.lock().await = Some(self.area);
+        }
 
         self.fill_solid(&(Rectangle::new(Point::new(0, 0), self.area.size)), color)
             .await
