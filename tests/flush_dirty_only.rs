@@ -1,11 +1,7 @@
 use core::convert::Infallible;
 use embedded_graphics::{
-    Pixel,
-    draw_target::DrawTarget,
-    geometry::Point,
-    pixelcolor::BinaryColor,
-    prelude::*,
-    primitives::{PrimitiveStyle, Rectangle},
+    Pixel, draw_target::DrawTarget, geometry::Point, pixelcolor::BinaryColor, prelude::*,
+    primitives::Rectangle,
 };
 use shared_display_core::{AreaToFlush, DrawTracker, PartitioningError, SharableBufferedDisplay};
 
@@ -83,15 +79,16 @@ async fn flush_dirty_only() -> Result<(), PartitioningError> {
     assert_eq!(DRAW_TRACKERS[0].take_dirty_area().await, AreaToFlush::All,);
     assert_eq!(DRAW_TRACKERS[0].take_dirty_area().await, AreaToFlush::None);
 
-    let rect = Rectangle::new(Point::new(0, 0), Size::new(2, 2));
-    rect.into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-        .draw(&mut right_display)
+    let rect = Rectangle::new(Point::new(0, 1), Size::new(2, 1));
+    right_display
+        .fill_solid(&rect, BinaryColor::On)
         .await
         .unwrap();
-    assert_eq!(DRAW_TRACKERS[1].take_dirty_area().await, AreaToFlush::All,);
+    assert_eq!(
+        DRAW_TRACKERS[1].take_dirty_area().await,
+        AreaToFlush::Some(rect),
+    );
     assert_eq!(DRAW_TRACKERS[1].take_dirty_area().await, AreaToFlush::None);
-
-    //TODO: add test for AreaToFlush::Some(rect)
 
     Ok(())
 }

@@ -160,6 +160,38 @@ where
     pub fn envelope(&mut self, other: &Rectangle) {
         self.area = self.area.envelope(other);
     }
+
+    async fn draw_iter_internal<I>(
+        &mut self,
+        pixels: I,
+        update_dirty_area: bool,
+    ) -> Result<(), D::Error>
+    where
+        I: ::core::iter::IntoIterator<Item = Pixel<D::Color>>,
+    {
+        let whole_buffer: &mut [B] =
+            // Safety: we check that every index is within our owned slice
+            unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) };
+        let mut has_drawn = false;
+        pixels
+            .into_iter()
+            .map(|pixel| Pixel(pixel.0 + self.area.top_left, pixel.1))
+            .filter(|Pixel(pos, _color)| self.contains(*pos))
+            .for_each(|p| {
+                let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
+                if self.contains(p.0) {
+                    D::set_pixel(&mut whole_buffer[buffer_index], p);
+                    has_drawn = true;
+                }
+            });
+        if has_drawn {
+            self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
+            if update_dirty_area {
+                *self.draw_tracker.dirty_area.lock().await = AreaToFlush::All;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<B, D> Dimensions for DisplayPartition<B, D>
@@ -220,26 +252,7 @@ where
     where
         I: ::core::iter::IntoIterator<Item = Pixel<Self::Color>>,
     {
-        let whole_buffer: &mut [B] =
-            // Safety: we check that every index is within our owned slice
-            unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) };
-        let mut has_drawn = false;
-        pixels
-            .into_iter()
-            .map(|pixel| Pixel(pixel.0 + self.area.top_left, pixel.1))
-            .filter(|Pixel(pos, _color)| self.contains(*pos))
-            .for_each(|p| {
-                let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
-                if self.contains(p.0) {
-                    D::set_pixel(&mut whole_buffer[buffer_index], p);
-                    has_drawn = true;
-                }
-            });
-        if has_drawn {
-            self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
-            *self.draw_tracker.dirty_area.lock().await = AreaToFlush::All;
-        }
-        Ok(())
+        self.draw_iter_internal(pixels, true).await
     }
 
     async fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
@@ -247,10 +260,11 @@ where
         I: IntoIterator<Item = Self::Color>,
     {
         self.draw_tracker.dirty_area.lock().await.include(area);
-        self.draw_iter(
+        self.draw_iter_internal(
             area.points()
                 .zip(colors)
                 .map(|(pos, color)| Pixel(pos, color)),
+            false,
         )
         .await
     }
@@ -258,7 +272,6 @@ where
     // Make sure to remove the offset from the Rectangle to be cleared,
     // draw_iter adds it again
     async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
         *self.draw_tracker.dirty_area.lock().await = AreaToFlush::All;
 
         self.fill_solid(&(Rectangle::new(Point::new(0, 0), self.area.size)), color)
