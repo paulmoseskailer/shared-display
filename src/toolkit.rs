@@ -4,7 +4,7 @@ use core::future::Future;
 use core::pin::Pin;
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
-use embassy_time::Timer;
+use embassy_time::{Duration, Timer};
 use embedded_graphics::{
     geometry::{Point, Size},
     primitives::Rectangle,
@@ -12,9 +12,10 @@ use embedded_graphics::{
 use static_cell::StaticCell;
 
 use shared_display_core::{
-    DisplayPartition, DrawTracker, PartitioningError, SharableBufferedDisplay,
+    AreaToFlush, DisplayPartition, DrawTracker, PartitioningError, SharableBufferedDisplay,
 };
 
+const FLUSH_INTERVAL: Duration = Duration::from_millis(20);
 const MAX_APPS: usize = 8;
 const EVENT_QUEUE_SIZE: usize = MAX_APPS;
 pub static EVENTS: Channel<CriticalSectionRawMutex, ResizeEvent, EVENT_QUEUE_SIZE> = Channel::new();
@@ -26,6 +27,7 @@ pub enum AppStart {
     Failure,
 }
 
+#[derive(PartialEq, Eq)]
 pub enum FlushResult {
     Continue,
     Abort,
@@ -149,17 +151,20 @@ where
         F: AsyncFnMut(&mut D, Rectangle) -> FlushResult,
     {
         'outer: loop {
-            for draw_tracker in self.draw_trackers.iter() {
-                if let Some(area) = draw_tracker.take_dirty_area().await {
-                    match flush_area(&mut *self.real_display.lock().await, area).await {
-                        FlushResult::Continue => {}
-                        FlushResult::Abort => {
-                            break 'outer;
-                        }
+            for (index, draw_tracker) in self.draw_trackers.iter().enumerate() {
+                let area_to_flush = match draw_tracker.take_dirty_area().await {
+                    AreaToFlush::None => None,
+                    AreaToFlush::All => Some(self.partition_areas[index]),
+                    AreaToFlush::Some(rect) => Some(rect),
+                };
+                if let Some(rect) = area_to_flush {
+                    let result = flush_area(&mut *self.real_display.lock().await, rect).await;
+                    if result == FlushResult::Abort {
+                        break 'outer;
                     }
                 }
             }
-            Timer::after_millis(200).await;
+            Timer::after(FLUSH_INTERVAL).await;
         }
     }
 }
