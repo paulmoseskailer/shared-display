@@ -1,4 +1,3 @@
-#![no_std]
 #![allow(async_fn_in_trait)]
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -11,6 +10,10 @@ use embedded_graphics::{
     prelude::{Dimensions, PixelColor, Size},
     primitives::Rectangle,
 };
+
+// TODO: this could be an associated const for SharableBufferedDisplay
+// once that feature is stabilized
+pub const MAX_NUM_PIXELS: usize = 128 * 96;
 
 #[derive(Debug)]
 pub enum PartitioningError {
@@ -45,6 +48,94 @@ impl AreaToFlush {
     }
 }
 
+pub trait SharableBufferedDisplay: DrawTarget {
+    type BufferElement: Copy;
+
+    fn get_buffer(&mut self) -> &mut [Self::BufferElement];
+
+    fn calculate_buffer_index(point: Point, parent_size: Size) -> usize;
+
+    fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>);
+
+    fn get_compressed_buffer(
+        &mut self,
+    ) -> heapless::Vec<(Self::BufferElement, u8), MAX_NUM_PIXELS> {
+        let mut result = heapless::Vec::new();
+        // TODO: actually compress here
+        eprintln!("TODO: remove copy while compressing!");
+        result.extend(self.get_buffer().iter().map(|x| (*x, 1_u8)));
+        result
+    }
+
+    fn decompress_buffer(
+        &mut self,
+        compressed_buffer: &heapless::Vec<(Self::BufferElement, u8), MAX_NUM_PIXELS>,
+    ) {
+        let destination = self.get_buffer();
+        let mut i = 0;
+        let mut src_iter = compressed_buffer.iter();
+        while let Some((color, run_length)) = src_iter.next() {
+            for offset in 0..*run_length {
+                destination[i + offset as usize] = *color;
+            }
+            i += *run_length as usize;
+        }
+    }
+}
+
+pub struct CompressedDisplay<D: SharableBufferedDisplay> {
+    pub display: D,
+    pub compressed_buffer: heapless::Vec<(D::BufferElement, u8), MAX_NUM_PIXELS>,
+}
+
+impl<D: SharableBufferedDisplay> CompressedDisplay<D> {
+    pub fn new(mut display: D) -> Self {
+        let compressed_buffer = display.get_compressed_buffer();
+        Self {
+            display,
+            compressed_buffer,
+        }
+    }
+
+    pub fn new_partition(
+        &mut self,
+        area: Rectangle,
+        draw_tracker: &'static DrawTracker,
+    ) -> Result<DisplayPartition<D::BufferElement, D>, PartitioningError> {
+        if area.size.width < 8 {
+            return Err(PartitioningError::PartitionTooSmall);
+        }
+
+        let parent_size = self.bounding_box().size;
+        let buffer_len = self.display.get_buffer().len();
+        let pixels_per_buffer_el = (parent_size.width * parent_size.height) as usize / buffer_len;
+        if pixels_per_buffer_el > 0 && parent_size.width % pixels_per_buffer_el as u32 != 0 {
+            return Err(PartitioningError::BufferPixelMismatch);
+        }
+
+        if area.size.width % 8 != 0 {
+            return Err(PartitioningError::PartitionBadWidth);
+        }
+
+        Ok(DisplayPartition::new(
+            &mut self.compressed_buffer,
+            parent_size,
+            area,
+            draw_tracker,
+        ))
+    }
+
+    pub fn decompress_buffer(&mut self) {
+        self.display.decompress_buffer(&self.compressed_buffer);
+    }
+}
+
+impl<D: SharableBufferedDisplay> Dimensions for CompressedDisplay<D> {
+    fn bounding_box(&self) -> Rectangle {
+        self.display.bounding_box()
+    }
+}
+
 pub struct DrawTracker {
     is_dirty: AtomicBool,
     pub dirty_area: Mutex<CriticalSectionRawMutex, AreaToFlush>,
@@ -72,7 +163,7 @@ impl DrawTracker {
 }
 
 pub struct DisplayPartition<B, D: ?Sized> {
-    pub buffer: *mut B,
+    pub buffer: *mut (B, u8),
     buffer_len: usize,
     pub parent_size: Size,
     pub area: Rectangle,
@@ -97,7 +188,7 @@ where
     D: SharableBufferedDisplay<BufferElement = B, Color = C> + ?Sized,
 {
     pub fn new(
-        buffer: &mut [B],
+        buffer: &mut heapless::Vec<(B, u8), MAX_NUM_PIXELS>,
         parent_size: Size,
         area: Rectangle,
         draw_tracker: &'static DrawTracker,
@@ -112,55 +203,26 @@ where
         }
     }
 
-    pub fn split_vertically(
-        &mut self,
-    ) -> Result<(DisplayPartition<B, D>, DisplayPartition<B, D>), PartitioningError> {
-        let size = self.area.size;
-
-        // ensure no bytes are split in half by rounding to a split of width multiple of 8
-        let left_area_width = (size.width / 2) + 7 & !7;
-        let left_area = Rectangle::new(self.area.top_left, Size::new(left_area_width, size.height));
-        let right_area = Rectangle::new(
-            self.area.top_left + Point::new(left_area_width.try_into().unwrap(), 0),
-            Size::new(size.width - left_area_width, size.height),
-        );
-
-        if left_area_width < 8 || size.width - left_area_width < 8 {
-            return Err(PartitioningError::PartitionTooSmall);
-        }
-
-        let pixels_per_buffer_el =
-            (self.parent_size.width * self.parent_size.height) as usize / self.buffer_len;
-        if pixels_per_buffer_el > 0 && self.parent_size.width % pixels_per_buffer_el as u32 != 0 {
-            return Err(PartitioningError::BufferPixelMismatch);
-        }
-
-        Ok((
-            DisplayPartition::new(
-                unsafe {
-                    // SAFETY: self.buffer and self.buffer_len are initialized from slice in new
-                    core::slice::from_raw_parts_mut(self.buffer, self.buffer_len)
-                },
-                self.parent_size,
-                left_area,
-                self.draw_tracker,
-            ),
-            DisplayPartition::new(
-                unsafe {
-                    // SAFETY: self.buffer and self.buffer_len are initialized from slice in new
-                    core::slice::from_raw_parts_mut(self.buffer, self.buffer_len)
-                },
-                self.parent_size,
-                right_area,
-                self.draw_tracker,
-            ),
-        ))
-    }
-
     pub fn envelope(&mut self, other: &Rectangle) {
         self.area = self.area.envelope(other);
     }
 
+    fn get_compressed_buffer_index(
+        compressed_buffer: &mut [(B, u8)],
+        buffer_index: usize,
+    ) -> usize {
+        let mut current_index = 0;
+        while current_index < buffer_index {
+            let (_color, run_length) = &compressed_buffer[current_index];
+            if (current_index + *run_length as usize) > buffer_index {
+                break;
+            }
+            current_index += *run_length as usize;
+        }
+        current_index
+    }
+
+    // Internalized to add the extra parameter update_dirty_area
     async fn draw_iter_internal<I>(
         &mut self,
         pixels: I,
@@ -169,7 +231,7 @@ where
     where
         I: ::core::iter::IntoIterator<Item = Pixel<D::Color>>,
     {
-        let whole_buffer: &mut [B] =
+        let compressed_buffer: &mut [(B, u8)] =
             // Safety: we check that every index is within our owned slice
             unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) };
         let mut has_drawn = false;
@@ -180,7 +242,9 @@ where
             .for_each(|p| {
                 let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
                 if self.contains(p.0) {
-                    D::set_pixel(&mut whole_buffer[buffer_index], p);
+                    let compressed_buffer_index =
+                        Self::get_compressed_buffer_index(compressed_buffer, buffer_index);
+                    D::set_pixel(&mut compressed_buffer[compressed_buffer_index].0, p);
                     has_drawn = true;
                 }
             });
@@ -200,44 +264,6 @@ where
 {
     fn bounding_box(&self) -> Rectangle {
         self.area
-    }
-}
-
-pub trait SharableBufferedDisplay: DrawTarget {
-    type BufferElement;
-
-    fn get_buffer(&mut self) -> &mut [Self::BufferElement];
-
-    fn calculate_buffer_index(point: Point, parent_size: Size) -> usize;
-
-    fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>);
-
-    fn new_partition(
-        &mut self,
-        area: Rectangle,
-        draw_tracker: &'static DrawTracker,
-    ) -> Result<DisplayPartition<Self::BufferElement, Self>, PartitioningError> {
-        if area.size.width < 8 {
-            return Err(PartitioningError::PartitionTooSmall);
-        }
-
-        let parent_size = self.bounding_box().size;
-        let buffer_len = self.get_buffer().len();
-        let pixels_per_buffer_el = (parent_size.width * parent_size.height) as usize / buffer_len;
-        if pixels_per_buffer_el > 0 && parent_size.width % pixels_per_buffer_el as u32 != 0 {
-            return Err(PartitioningError::BufferPixelMismatch);
-        }
-
-        if area.size.width % 8 != 0 {
-            return Err(PartitioningError::PartitionBadWidth);
-        }
-
-        Ok(DisplayPartition::new(
-            self.get_buffer(),
-            parent_size,
-            area,
-            draw_tracker,
-        ))
     }
 }
 

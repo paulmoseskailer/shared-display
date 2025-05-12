@@ -6,13 +6,14 @@ use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
 use embassy_time::{Duration, Timer};
 use embedded_graphics::{
-    geometry::{Point, Size},
+    geometry::{Dimensions, Point, Size},
     primitives::Rectangle,
 };
 use static_cell::StaticCell;
 
 use shared_display_core::{
-    AreaToFlush, DisplayPartition, DrawTracker, PartitioningError, SharableBufferedDisplay,
+    AreaToFlush, CompressedDisplay, DisplayPartition, DrawTracker, PartitioningError,
+    SharableBufferedDisplay,
 };
 
 const FLUSH_INTERVAL: Duration = Duration::from_millis(20);
@@ -38,7 +39,7 @@ pub enum ResizeEvent {
 }
 
 pub struct SharedDisplay<D: SharableBufferedDisplay> {
-    pub real_display: Mutex<CriticalSectionRawMutex, D>,
+    pub compressed_real_display: Mutex<CriticalSectionRawMutex, CompressedDisplay<D>>,
     partition_areas: heapless::Vec<Rectangle, MAX_APPS>,
     draw_trackers: &'static [DrawTracker; MAX_APPS],
 
@@ -52,7 +53,7 @@ where
     pub fn new(real_display: D, spawner: Spawner) -> Self {
         let spawner_ref: &'static Spawner = SPAWNER.init(spawner);
         SharedDisplay {
-            real_display: Mutex::new(real_display),
+            compressed_real_display: Mutex::new(CompressedDisplay::new(real_display)),
             partition_areas: heapless::Vec::new(),
             draw_trackers: &DRAW_TRACKERS,
             spawner: spawner_ref,
@@ -63,10 +64,8 @@ where
         &mut self,
         area: Rectangle,
     ) -> Result<DisplayPartition<B, D>, PartitioningError> {
-        let real_display: &mut D = &mut *self.real_display.lock().await;
-
         // check area inside display
-        let bb = real_display.bounding_box();
+        let bb = self.compressed_real_display.lock().await.bounding_box();
         if !(bb.contains(area.top_left)
             && bb.contains(area.bottom_right().unwrap_or(area.top_left)))
         {
@@ -81,7 +80,11 @@ where
         }
 
         let index = self.partition_areas.len();
-        let result = real_display.new_partition(area, &self.draw_trackers[index]);
+        let result = self
+            .compressed_real_display
+            .lock()
+            .await
+            .new_partition(area, &self.draw_trackers[index]);
 
         if result.is_ok() {
             self.partition_areas.push(area.clone()).unwrap();
@@ -93,7 +96,7 @@ where
     pub async fn partition_vertically(
         &mut self,
     ) -> Result<(DisplayPartition<B, D>, DisplayPartition<B, D>), PartitioningError> {
-        let total_area = self.real_display.lock().await.bounding_box();
+        let total_area = self.compressed_real_display.lock().await.bounding_box();
         let half_size = Size::new(total_area.size.width / 2, total_area.size.height);
         let left_area = Rectangle::new(total_area.top_left, half_size);
         let right_area = Rectangle::new(
@@ -158,7 +161,14 @@ where
                     AreaToFlush::Some(rect) => Some(rect),
                 };
                 if let Some(rect) = area_to_flush {
-                    let result = flush_area(&mut *self.real_display.lock().await, rect).await;
+                    // TODO: decompress buffer here
+                    self.compressed_real_display
+                        .lock()
+                        .await
+                        .decompress_buffer();
+                    let result =
+                        flush_area(&mut self.compressed_real_display.lock().await.display, rect)
+                            .await;
                     if result == FlushResult::Abort {
                         break 'outer;
                     }
