@@ -10,6 +10,7 @@ use embedded_graphics::{
     prelude::{Dimensions, PixelColor, Size},
     primitives::Rectangle,
 };
+use std::time::Instant;
 
 // TODO: this could be an associated const for SharableBufferedDisplay
 // once that feature is stabilized
@@ -49,7 +50,7 @@ impl AreaToFlush {
 }
 
 pub trait SharableBufferedDisplay: DrawTarget {
-    type BufferElement: Copy;
+    type BufferElement: Copy + PartialEq;
 
     fn get_buffer(&mut self) -> &mut [Self::BufferElement];
 
@@ -60,10 +61,39 @@ pub trait SharableBufferedDisplay: DrawTarget {
     fn get_compressed_buffer(
         &mut self,
     ) -> heapless::Vec<(Self::BufferElement, u8), MAX_NUM_PIXELS> {
+        let start = Instant::now();
         let mut result = heapless::Vec::new();
-        // TODO: actually compress here
+        let mut running_sum: usize = 0;
         eprintln!("TODO: remove copy while compressing!");
-        result.extend(self.get_buffer().iter().map(|x| (*x, 1_u8)));
+        let mut source = self.get_buffer().iter();
+        let len_uncompressed = source.len();
+        if let Some(first) = source.next() {
+            let mut prev_color = *first;
+            let mut run_length = 1;
+            for &color in source {
+                if color == prev_color && run_length < u8::MAX {
+                    run_length += 1;
+                } else {
+                    result
+                        .push((prev_color, run_length))
+                        .unwrap_or_else(|_| panic!("compressed_buffer too small!"));
+                    running_sum += run_length as usize;
+                    prev_color = color;
+                    run_length = 1;
+                }
+            }
+            result
+                .push((prev_color, run_length))
+                .unwrap_or_else(|_| panic!("compressed_buffer too small!"));
+            running_sum += run_length as usize;
+            assert_eq!(running_sum, len_uncompressed);
+        }
+        println!(
+            "compressing took {}us, len {} -> {}",
+            Instant::now().duration_since(start).as_micros(),
+            len_uncompressed,
+            result.len()
+        );
         result
     }
 
@@ -71,6 +101,7 @@ pub trait SharableBufferedDisplay: DrawTarget {
         &mut self,
         compressed_buffer: &heapless::Vec<(Self::BufferElement, u8), MAX_NUM_PIXELS>,
     ) {
+        let start = Instant::now();
         let destination = self.get_buffer();
         let mut i = 0;
         let mut src_iter = compressed_buffer.iter();
@@ -80,6 +111,10 @@ pub trait SharableBufferedDisplay: DrawTarget {
             }
             i += *run_length as usize;
         }
+        println!(
+            "decompressing took {}us",
+            Instant::now().duration_since(start).as_micros()
+        );
     }
 }
 
@@ -209,17 +244,19 @@ where
 
     fn get_compressed_buffer_index(
         compressed_buffer: &mut [(B, u8)],
-        buffer_index: usize,
+        target_index: usize,
     ) -> usize {
-        let mut current_index = 0;
-        while current_index < buffer_index {
-            let (_color, run_length) = &compressed_buffer[current_index];
-            if (current_index + *run_length as usize) > buffer_index {
+        let mut decompressed_index = 0;
+        let mut compressed_index = 0;
+        while decompressed_index < target_index {
+            let (_color, run_length) = &compressed_buffer[compressed_index];
+            if (decompressed_index + *run_length as usize) > target_index {
                 break;
             }
-            current_index += *run_length as usize;
+            decompressed_index += *run_length as usize;
+            compressed_index += 1;
         }
-        current_index
+        compressed_index
     }
 
     // Internalized to add the extra parameter update_dirty_area
@@ -244,6 +281,8 @@ where
                 if self.contains(p.0) {
                     let compressed_buffer_index =
                         Self::get_compressed_buffer_index(compressed_buffer, buffer_index);
+                    // TODO: set_pixel in compressed buffer correctly
+                    // (this is the uncompressed set_pixel function directly)
                     D::set_pixel(&mut compressed_buffer[compressed_buffer_index].0, p);
                     has_drawn = true;
                 }

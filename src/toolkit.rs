@@ -161,7 +161,6 @@ where
                     AreaToFlush::Some(rect) => Some(rect),
                 };
                 if let Some(rect) = area_to_flush {
-                    // TODO: decompress buffer here
                     self.compressed_real_display
                         .lock()
                         .await
