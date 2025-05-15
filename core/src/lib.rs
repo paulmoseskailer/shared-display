@@ -1,6 +1,8 @@
 #![no_std]
 #![allow(async_fn_in_trait)]
 
+pub mod compressed;
+
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embedded_graphics::prelude::{ContainsPoint, PointsIter};
@@ -11,6 +13,8 @@ use embedded_graphics::{
     prelude::{Dimensions, PixelColor, Size},
     primitives::Rectangle,
 };
+
+pub const MAX_APPS_PER_SCREEN: usize = 8;
 
 pub trait SharableBufferedDisplay: DrawTarget {
     type BufferElement;

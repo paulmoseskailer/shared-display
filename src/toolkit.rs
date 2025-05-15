@@ -1,5 +1,7 @@
+#![allow(async_fn_in_trait)]
 extern crate alloc;
 use alloc::boxed::Box;
+
 use core::future::Future;
 use core::pin::Pin;
 use embassy_executor::Spawner;
@@ -12,15 +14,17 @@ use embedded_graphics::{
 use static_cell::StaticCell;
 
 use shared_display_core::{
-    AreaToFlush, DisplayPartition, DrawTracker, PartitioningError, SharableBufferedDisplay,
+    AreaToFlush, DisplayPartition, DrawTracker, MAX_APPS_PER_SCREEN, PartitioningError,
+    SharableBufferedDisplay,
+    compressed::{CompressableDisplay, CompressedDisplay, CompressedDisplayPartition},
 };
 
 const FLUSH_INTERVAL: Duration = Duration::from_millis(20);
-const MAX_APPS: usize = 8;
-const EVENT_QUEUE_SIZE: usize = MAX_APPS;
+const EVENT_QUEUE_SIZE: usize = MAX_APPS_PER_SCREEN;
 pub static EVENTS: Channel<CriticalSectionRawMutex, ResizeEvent, EVENT_QUEUE_SIZE> = Channel::new();
 static SPAWNER: StaticCell<Spawner> = StaticCell::new();
-static DRAW_TRACKERS: [DrawTracker; MAX_APPS] = [const { DrawTracker::new() }; MAX_APPS];
+static DRAW_TRACKERS: [DrawTracker; MAX_APPS_PER_SCREEN] =
+    [const { DrawTracker::new() }; MAX_APPS_PER_SCREEN];
 
 pub enum AppStart {
     Success,
@@ -39,8 +43,8 @@ pub enum ResizeEvent {
 
 pub struct SharedDisplay<D: SharableBufferedDisplay> {
     pub real_display: Mutex<CriticalSectionRawMutex, D>,
-    partition_areas: heapless::Vec<Rectangle, MAX_APPS>,
-    draw_trackers: &'static [DrawTracker; MAX_APPS],
+    partition_areas: heapless::Vec<Rectangle, MAX_APPS_PER_SCREEN>,
+    draw_trackers: &'static [DrawTracker; MAX_APPS_PER_SCREEN],
 
     spawner: &'static Spawner,
 }
@@ -169,7 +173,7 @@ where
     }
 }
 
-#[embassy_executor::task(pool_size = MAX_APPS)]
+#[embassy_executor::task(pool_size = MAX_APPS_PER_SCREEN)]
 async fn launch_future(app_future: Pin<Box<dyn Future<Output = ()>>>, area: Rectangle) {
     app_future.await;
 
@@ -190,4 +194,64 @@ where
     spawner.must_spawn(launch_future(Box::pin(fut), area));
 
     return AppStart::Success;
+}
+
+pub struct CompressedSharedDisplay<D: CompressableDisplay> {
+    pub real_display: Mutex<CriticalSectionRawMutex, CompressedDisplay<D>>,
+    partition_areas: heapless::Vec<Rectangle, MAX_APPS_PER_SCREEN>,
+
+    spawner: &'static Spawner,
+}
+
+impl<B, D> CompressedSharedDisplay<D>
+where
+    D: CompressableDisplay<BufferElement = B>,
+{
+    pub fn new(real_display: D, spawner: Spawner) -> Self {
+        let spawner_ref: &'static Spawner = SPAWNER.init(spawner);
+        CompressedSharedDisplay {
+            real_display: Mutex::new(CompressedDisplay::new(real_display)),
+            partition_areas: heapless::Vec::new(),
+            spawner: spawner_ref,
+        }
+    }
+
+    async fn new_partition(
+        &mut self,
+        area: Rectangle,
+    ) -> Result<CompressedDisplayPartition<B, D>, PartitioningError> {
+        let display: &mut CompressedDisplay<D> = &mut *self.real_display.lock().await;
+        let result = display.new_partition(area);
+
+        if result.is_ok() {
+            self.partition_areas.push(area.clone()).unwrap();
+        }
+
+        result
+    }
+
+    pub async fn launch_new_app<F>(
+        &mut self,
+        mut app_fn: F,
+        area: Rectangle,
+    ) -> Result<(), PartitioningError>
+    where
+        F: AsyncFnMut(CompressedDisplayPartition<B, D>) -> (),
+        for<'b> F::CallRefFuture<'b>: 'static,
+    {
+        let partition = self.new_partition(area).await?;
+
+        let fut = app_fn(partition);
+        self.spawner
+            .must_spawn(launch_future(Box::pin(fut), area.clone()));
+
+        Ok(())
+    }
+
+    pub async fn flush_loop(&self) {
+        loop {
+            self.real_display.lock().await.flush_buffer();
+            Timer::after(FLUSH_INTERVAL).await;
+        }
+    }
 }
