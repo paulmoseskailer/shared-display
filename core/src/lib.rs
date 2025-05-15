@@ -12,6 +12,44 @@ use embedded_graphics::{
     primitives::Rectangle,
 };
 
+pub trait SharableBufferedDisplay: DrawTarget {
+    type BufferElement;
+
+    fn get_buffer(&mut self) -> &mut [Self::BufferElement];
+
+    fn calculate_buffer_index(point: Point, parent_size: Size) -> usize;
+
+    fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>);
+
+    fn new_partition(
+        &mut self,
+        area: Rectangle,
+        draw_tracker: &'static DrawTracker,
+    ) -> Result<DisplayPartition<Self::BufferElement, Self>, PartitioningError> {
+        if area.size.width < 8 {
+            return Err(PartitioningError::PartitionTooSmall);
+        }
+
+        let parent_size = self.bounding_box().size;
+        let buffer_len = self.get_buffer().len();
+        let pixels_per_buffer_el = (parent_size.width * parent_size.height) as usize / buffer_len;
+        if pixels_per_buffer_el > 0 && parent_size.width % pixels_per_buffer_el as u32 != 0 {
+            return Err(PartitioningError::BufferPixelMismatch);
+        }
+
+        if area.size.width % 8 != 0 {
+            return Err(PartitioningError::PartitionBadWidth);
+        }
+
+        Ok(DisplayPartition::new(
+            self.get_buffer(),
+            parent_size,
+            area,
+            draw_tracker,
+        ))
+    }
+}
+
 #[derive(Debug)]
 pub enum PartitioningError {
     // cannot create partitions less than 8 pixels wide
@@ -22,53 +60,6 @@ pub enum PartitioningError {
     PartitionBadWidth,
     OutsideParent,
     Overlaps,
-    // when re-splitting partitions
-    ExistingNotFound,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AreaToFlush {
-    All,
-    Some(Rectangle),
-    None,
-}
-
-impl AreaToFlush {
-    pub fn include(&mut self, other: &Rectangle) {
-        match self {
-            AreaToFlush::All => {}
-            AreaToFlush::None => *self = AreaToFlush::Some(other.clone()),
-            AreaToFlush::Some(rect) => {
-                *self = AreaToFlush::Some(rect.envelope(other));
-            }
-        }
-    }
-}
-
-pub struct DrawTracker {
-    is_dirty: AtomicBool,
-    pub dirty_area: Mutex<CriticalSectionRawMutex, AreaToFlush>,
-}
-
-impl DrawTracker {
-    pub const fn new() -> Self {
-        Self {
-            is_dirty: AtomicBool::new(false),
-            dirty_area: Mutex::new(AreaToFlush::None),
-        }
-    }
-
-    pub async fn take_dirty_area(&self) -> AreaToFlush {
-        if self.is_dirty.load(Ordering::Acquire) {
-            let mut guard = self.dirty_area.lock().await;
-            let area = guard.clone();
-            *guard = AreaToFlush::None;
-            self.is_dirty.store(false, Ordering::Release);
-            area
-        } else {
-            AreaToFlush::None
-        }
-    }
 }
 
 pub struct DisplayPartition<B, D: ?Sized> {
@@ -203,44 +194,6 @@ where
     }
 }
 
-pub trait SharableBufferedDisplay: DrawTarget {
-    type BufferElement;
-
-    fn get_buffer(&mut self) -> &mut [Self::BufferElement];
-
-    fn calculate_buffer_index(point: Point, parent_size: Size) -> usize;
-
-    fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>);
-
-    fn new_partition(
-        &mut self,
-        area: Rectangle,
-        draw_tracker: &'static DrawTracker,
-    ) -> Result<DisplayPartition<Self::BufferElement, Self>, PartitioningError> {
-        if area.size.width < 8 {
-            return Err(PartitioningError::PartitionTooSmall);
-        }
-
-        let parent_size = self.bounding_box().size;
-        let buffer_len = self.get_buffer().len();
-        let pixels_per_buffer_el = (parent_size.width * parent_size.height) as usize / buffer_len;
-        if pixels_per_buffer_el > 0 && parent_size.width % pixels_per_buffer_el as u32 != 0 {
-            return Err(PartitioningError::BufferPixelMismatch);
-        }
-
-        if area.size.width % 8 != 0 {
-            return Err(PartitioningError::PartitionBadWidth);
-        }
-
-        Ok(DisplayPartition::new(
-            self.get_buffer(),
-            parent_size,
-            area,
-            draw_tracker,
-        ))
-    }
-}
-
 impl<B, D> DrawTarget for DisplayPartition<B, D>
 where
     D: SharableBufferedDisplay<BufferElement = B>,
@@ -276,5 +229,50 @@ where
 
         self.fill_solid(&(Rectangle::new(Point::new(0, 0), self.area.size)), color)
             .await
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AreaToFlush {
+    All,
+    Some(Rectangle),
+    None,
+}
+
+impl AreaToFlush {
+    pub fn include(&mut self, other: &Rectangle) {
+        match self {
+            AreaToFlush::All => {}
+            AreaToFlush::None => *self = AreaToFlush::Some(other.clone()),
+            AreaToFlush::Some(rect) => {
+                *self = AreaToFlush::Some(rect.envelope(other));
+            }
+        }
+    }
+}
+
+pub struct DrawTracker {
+    is_dirty: AtomicBool,
+    pub dirty_area: Mutex<CriticalSectionRawMutex, AreaToFlush>,
+}
+
+impl DrawTracker {
+    pub const fn new() -> Self {
+        Self {
+            is_dirty: AtomicBool::new(false),
+            dirty_area: Mutex::new(AreaToFlush::None),
+        }
+    }
+
+    pub async fn take_dirty_area(&self) -> AreaToFlush {
+        if self.is_dirty.load(Ordering::Acquire) {
+            let mut guard = self.dirty_area.lock().await;
+            let area = guard.clone();
+            *guard = AreaToFlush::None;
+            self.is_dirty.store(false, Ordering::Release);
+            area
+        } else {
+            AreaToFlush::None
+        }
     }
 }
