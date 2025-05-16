@@ -2,6 +2,7 @@
 #![allow(async_fn_in_trait)]
 
 pub mod compressed;
+pub mod flush_lock;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};

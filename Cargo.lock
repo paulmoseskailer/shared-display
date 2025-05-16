@@ -696,8 +696,10 @@ name = "shared-display-core"
 version = "0.1.0"
 dependencies = [
  "embassy-sync",
+ "embassy-time",
  "embedded-graphics",
  "heapless",
+ "portable-atomic",
 ]
 
 [[package]]
