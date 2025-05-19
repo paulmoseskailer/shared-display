@@ -12,6 +12,10 @@ const RETRY_DELAY: Duration = Duration::from_millis(20);
 pub struct FlushLock {}
 
 impl FlushLock {
+    pub fn new() -> Self {
+        FlushLock {}
+    }
+
     async fn lock_flush(&self) {
         let res = INNER.fetch_and(FLUSH_LOCK_BIT, Ordering::Relaxed);
         assert_eq!(
@@ -34,20 +38,20 @@ impl FlushLock {
 
     pub async fn protect_flush<F, R>(&self, f: F) -> R
     where
-        F: FnOnce() -> R,
+        F: AsyncFnOnce() -> R,
     {
+        println!("protecting a flush!");
         self.lock_flush().await;
         // TODO: make sure unlock is called even if f panics?
-        let result = f();
+        let result = f().await;
         self.unlock_flush().await;
         result
     }
 
     async fn lock_write(&self) {
-        let mut success = false;
-        'lock_write_loop: while !success {
+        'lock_write_loop: loop {
             let current = INNER.load(Ordering::Relaxed);
-            if current & FLUSH_LOCK_BIT {
+            if current & FLUSH_LOCK_BIT > 0 {
                 // flush in progress, try again
                 Timer::after(RETRY_DELAY).await;
                 continue;

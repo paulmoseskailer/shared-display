@@ -1,8 +1,10 @@
-#![no_std]
 #![allow(async_fn_in_trait)]
 
 pub mod compressed;
+pub use compressed::*;
+
 pub mod flush_lock;
+pub use flush_lock::*;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
@@ -24,7 +26,7 @@ pub trait SharableBufferedDisplay: DrawTarget {
 
     fn calculate_buffer_index(point: Point, parent_size: Size) -> usize;
 
-    fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>);
+    fn map_to_buffer_element(color: Self::Color) -> Self::BufferElement;
 
     fn new_partition(
         &mut self,
@@ -176,7 +178,7 @@ where
             .for_each(|p| {
                 let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
                 if self.contains(p.0) {
-                    D::set_pixel(&mut whole_buffer[buffer_index], p);
+                    whole_buffer[buffer_index] = D::map_to_buffer_element(p.1);
                     has_drawn = true;
                 }
             });

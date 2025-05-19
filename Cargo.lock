@@ -254,7 +254,6 @@ dependencies = [
 [[package]]
 name = "embedded-graphics-simulator"
 version = "0.7.0"
-source = "git+https://github.com/paulmoseskailer/simulator.git#d1530172e044b006ea93aa565af6f5990fee3c87"
 dependencies = [
  "base64",
  "embedded-graphics",
