@@ -24,7 +24,7 @@ pub trait SharableBufferedDisplay: DrawTarget {
 
     fn get_buffer(&mut self) -> &mut [Self::BufferElement];
 
-    fn calculate_buffer_index(point: Point, parent_size: Size) -> usize;
+    fn calculate_buffer_index(point: Point, buffer_area_size: Size) -> usize;
 
     fn map_to_buffer_element(color: Self::Color) -> Self::BufferElement;
 

@@ -19,7 +19,7 @@ use shared_display_core::{
     compressed::{CompressableDisplay, CompressedDisplayPartition},
 };
 
-const FLUSH_INTERVAL: Duration = Duration::from_millis(20);
+const FLUSH_INTERVAL: Duration = Duration::from_millis(1000);
 const EVENT_QUEUE_SIZE: usize = MAX_APPS_PER_SCREEN;
 pub static EVENTS: Channel<CriticalSectionRawMutex, ResizeEvent, EVENT_QUEUE_SIZE> = Channel::new();
 static SPAWNER: StaticCell<Spawner> = StaticCell::new();
@@ -230,7 +230,13 @@ impl<D: CompressableDisplay> CompressedDisplay<D> {
 
         // TODO: checks on area
         let partition = CompressedDisplayPartition::new(parent_size, area);
-        self.buffer_pointers.push(&partition.buffer).unwrap();
+        let len_before = self.buffer_pointers.len();
+        self.buffer_pointers.push(&*partition.buffer).unwrap();
+        println!(
+            "adding new buffer_pointer, num buffers {}->{}",
+            len_before,
+            self.buffer_pointers.len()
+        );
 
         Ok(partition)
     }
@@ -298,32 +304,37 @@ where
         F: AsyncFnMut(&mut D, &[D::BufferElement]) -> FlushResult,
     {
         'flush_loop: loop {
+            let mut buffer = Vec::with_capacity(self.resolution);
+            for &ptr in &self.real_display.lock().await.buffer_pointers {
+                if ptr.is_null() {
+                    panic!("found null ptr in CompressedDisplay.buffer_pointers!");
+                }
+                // SAFETY: We assume these pointers are valid and point to `Vec<(D::BufferElement, u8)>`.
+                let rle_buffer: &Vec<(D::BufferElement, u8)> = unsafe { &*ptr };
+
+                let mut total_decompressed_len = 0;
+                for &(value, count) in rle_buffer {
+                    total_decompressed_len += count as u64;
+                    buffer.extend(core::iter::repeat(value).take(count as usize));
+                }
+                println!(
+                    "rle buffer with {} runs decoded to {total_decompressed_len} pixels",
+                    rle_buffer.len()
+                );
+            }
+
+            assert_eq!(
+                buffer.len(),
+                self.resolution,
+                "decoded buffer doesn't match resolution"
+            );
+
             let flush_result = FlushLock::new()
                 .protect_flush(async || {
-                    let mut buffer = Vec::with_capacity(self.resolution);
-                    for &ptr in &self.real_display.lock().await.buffer_pointers {
-                        if ptr.is_null() {
-                            println!("found null ptr in CompressedDisplay.buffer_pointers!");
-                            continue;
-                        }
-                        // SAFETY: We assume these pointers are valid and point to `Vec<(D::BufferElement, u8)>`.
-                        let rle_buffer: &Vec<(D::BufferElement, u8)> = unsafe { &*ptr };
-                        println!("decompressing buffer with {} runs", rle_buffer.len());
-
-                        for &(value, count) in rle_buffer {
-                            buffer.extend(core::iter::repeat(value).take(count as usize));
-                        }
-                    }
-
-                    assert_eq!(
-                        buffer.len(),
-                        self.resolution,
-                        "decoded buffer doesn't match resolution"
-                    );
-
                     flush_fn(&mut self.real_display.lock().await.display, &buffer).await
                 })
                 .await;
+            println!("flush over \n");
             match flush_result {
                 FlushResult::Continue => {}
                 FlushResult::Abort => {

@@ -24,7 +24,7 @@ pub trait CompressableDisplay:
 
 pub struct CompressedDisplayPartition<B: core::cmp::PartialEq + Copy, D: ?Sized> {
     pub area: Rectangle,
-    pub buffer: Vec<(B, u8)>,
+    pub buffer: Box<Vec<(B, u8)>>,
     pub parent_size: Size,
     _display: core::marker::PhantomData<D>,
 }
@@ -51,11 +51,13 @@ where
 
 pub fn get_compressed_display_with_value<B: Copy>(area: Rectangle, value: B) -> Vec<(B, u8)> {
     let num_pixels = area.size.width * area.size.height;
-    let num_runs = match num_pixels % 255 {
-        0 => num_pixels / 255,
-        _ => num_pixels / 255 + 1,
-    };
-    vec![(value, 255); num_runs as usize]
+    let full_runs = num_pixels / 255;
+    let mut result = vec![(value, 255); full_runs as usize];
+    let remainder = num_pixels - (full_runs * 255);
+    if remainder > 0 {
+        result.push((value, remainder.try_into().unwrap()));
+    }
+    result
 }
 
 impl<C, B, D> CompressedDisplayPartition<B, D>
@@ -66,7 +68,7 @@ where
 {
     pub fn new(parent_size: Size, area: Rectangle) -> CompressedDisplayPartition<B, D> {
         CompressedDisplayPartition {
-            buffer: get_compressed_display_with_value(area, B::default()),
+            buffer: Box::new(get_compressed_display_with_value(area, B::default())),
             parent_size,
             area,
             _display: core::marker::PhantomData,
@@ -78,11 +80,27 @@ where
         todo!("enveloping compressed partitions not yet implemented");
     }
 
+    fn check_rle(&self) -> Result<(), ()> {
+        let resolution = self.area.size.width * self.area.size.height;
+        let decompressed_buffer_len = self
+            .buffer
+            .iter()
+            .fold(0_u64, |before, (_color, run_len)| before + *run_len as u64);
+        if decompressed_buffer_len == resolution as u64 {
+            return Ok(());
+        }
+        println!(
+            "RLE ({} runs) encodes {decompressed_buffer_len} pixels != resolution {resolution}",
+            self.buffer.len()
+        );
+        return Err(());
+    }
+
     fn set_pixel(&mut self, pixel: Pixel<C>) {
-        let target_index = D::calculate_buffer_index(pixel.0, self.parent_size);
+        let target_index = D::calculate_buffer_index(pixel.0, self.area.size);
         let new_value = pixel.1;
 
-        let mut current_index = D::calculate_buffer_index(self.area.top_left, self.parent_size);
+        let mut current_index = 0;
         let mut run_index = 0;
         let mut iter = self.buffer.iter();
         while let Some((_color, run_length)) = iter.next() {
@@ -92,6 +110,11 @@ where
             current_index += *run_length as usize;
             run_index += 1;
         }
+        if run_index == self.buffer.len() {
+            panic!("set_pixel: did not find run to break up");
+        }
+
+        // TODO: merge runs if possible
         let (buffer_before_ref, run_len_before) = &self.buffer[run_index];
         if D::map_to_buffer_element(new_value) == *buffer_before_ref {
             return;
@@ -114,6 +137,10 @@ where
             self.buffer
                 .insert(index, (buffer_before, run_after_len.try_into().unwrap()));
         }
+
+        if self.check_rle().is_err() {
+            panic!("set_pixel({:?}) check rle failed", pixel.0);
+        }
     }
 }
 
@@ -130,6 +157,7 @@ where
     {
         FlushLock::new()
             .protect_write(|| {
+                let len_before = self.buffer.len();
                 let self_area = self.area;
                 let self_offset = self_area.top_left;
                 pixels
@@ -138,21 +166,18 @@ where
                     .for_each(|p| {
                         self.set_pixel(p);
                     });
+                if self.check_rle().is_err() {
+                    panic!("after draw_iter check rle failed");
+                }
+                println!(
+                    "after draw_iter, buffer num runs {}->{}",
+                    len_before,
+                    self.buffer.len(),
+                );
             })
             .await;
         Ok(())
     }
 
     // TODO: implement fill_contiguous, fill_solid efficiently
-
-    async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        FlushLock::new()
-            .protect_write(|| {
-                self.buffer.clear();
-                self.buffer =
-                    get_compressed_display_with_value(self.area, D::map_to_buffer_element(color));
-            })
-            .await;
-        Ok(())
-    }
 }

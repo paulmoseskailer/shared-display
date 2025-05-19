@@ -17,7 +17,11 @@ impl FlushLock {
     }
 
     async fn lock_flush(&self) {
-        let res = INNER.fetch_and(FLUSH_LOCK_BIT, Ordering::Relaxed);
+        let res = INNER.fetch_add(FLUSH_LOCK_BIT, Ordering::Relaxed);
+        assert_eq!(
+            INNER.load(Ordering::Relaxed) & FLUSH_LOCK_BIT,
+            FLUSH_LOCK_BIT
+        );
         assert_eq!(
             res & FLUSH_LOCK_BIT,
             0,
@@ -27,7 +31,10 @@ impl FlushLock {
         while INNER.load(Ordering::Relaxed) & COUNTER_BITS > 0 {
             Timer::after(RETRY_DELAY).await;
         }
+
+        assert_eq!(INNER.load(Ordering::Relaxed), FLUSH_LOCK_BIT);
     }
+
     async fn unlock_flush(&self) {
         let before = INNER.swap(0, Ordering::Relaxed);
         assert_eq!(
@@ -81,6 +88,10 @@ impl FlushLock {
     }
     async fn unlock_write(&self) {
         let before = INNER.fetch_sub(1, Ordering::Relaxed);
+        assert_ne!(
+            before, FLUSH_LOCK_BIT,
+            "before write_unlock, only FLUSH_LOCK was set, no writers registered"
+        );
         assert_ne!(before & COUNTER_BITS, 0, "after write, write counter was 0");
     }
 
