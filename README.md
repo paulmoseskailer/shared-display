@@ -7,6 +7,7 @@ Extends [`embedded-graphics`](https://github.com/embedded-graphics/embedded-grap
 ## How to Run
 
 See `examples/` for examples with the [`embedded-graphics-simulator` display](https://github.com/embedded-graphics/simulator).
+For the simulator to work, SDL2 has to be installed, as described in the [simulator repository](https://github.com/embedded-graphics/simulator?tab=readme-ov-file#setup).
 
 ```
 cargo run --example hello_world
