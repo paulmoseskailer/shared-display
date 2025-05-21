@@ -5,6 +5,7 @@ edition = "2024"
 
 [workspace]
 members = ["core"]
+exclude = ["examples/rp2040"]
 
 [dependencies]
 shared-display-core = { git = "https://github.com/paulmoseskailer/shared-display.git", version = "0.1.0", default-features = false }
