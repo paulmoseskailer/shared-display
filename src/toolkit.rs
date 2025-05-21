@@ -6,7 +6,7 @@ use core::future::Future;
 use core::pin::Pin;
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Instant, Timer};
 use embedded_graphics::{
     geometry::{Point, Size},
     primitives::Rectangle,
@@ -19,7 +19,7 @@ use shared_display_core::{
     compressed::{CompressableDisplay, CompressedDisplayPartition},
 };
 
-const FLUSH_INTERVAL: Duration = Duration::from_millis(800);
+const FLUSH_INTERVAL: Duration = Duration::from_millis(20);
 const EVENT_QUEUE_SIZE: usize = MAX_APPS_PER_SCREEN;
 pub static EVENTS: Channel<CriticalSectionRawMutex, ResizeEvent, EVENT_QUEUE_SIZE> = Channel::new();
 static SPAWNER: StaticCell<Spawner> = StaticCell::new();
@@ -298,6 +298,7 @@ where
         F: AsyncFnMut(&mut D, Vec<D::BufferElement>) -> FlushResult,
     {
         'flush_loop: loop {
+            let flush_begin = Instant::now();
             let mut partition_buffers: Vec<Vec<D::BufferElement>> =
                 Vec::with_capacity(self.partition_areas.len());
             assert_eq!(
@@ -361,6 +362,11 @@ where
 
             assert_eq!(entire_buffer.len(), self.resolution);
 
+            println!(
+                "decompressing buffers took {}ms",
+                Instant::now().duration_since(flush_begin).as_millis()
+            );
+
             let flush_result = FlushLock::new()
                 .protect_flush(async || {
                     flush_fn(&mut self.real_display.lock().await.display, entire_buffer).await
@@ -372,6 +378,11 @@ where
                     break 'flush_loop;
                 }
             }
+
+            println!(
+                "flush total took {}ms",
+                Instant::now().duration_since(flush_begin).as_millis()
+            );
             Timer::after(FLUSH_INTERVAL).await;
         }
     }

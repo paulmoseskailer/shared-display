@@ -76,11 +76,11 @@ impl SharableBufferedDisplay for FakeDisplay {
             .try_into()
             .unwrap()
     }
-    fn set_pixel(buffer: &mut Self::BufferElement, pixel: Pixel<Self::Color>) {
-        *buffer = match pixel.1 {
+    fn map_to_buffer_element(color: Self::Color) -> Self::BufferElement {
+        match color {
             BinaryColor::On => 1,
             BinaryColor::Off => 0,
-        };
+        }
     }
 }
 
