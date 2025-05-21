@@ -45,7 +45,7 @@ async fn text_app(mut display: CompressedDisplayPartition<BinaryColor, DisplayTy
         .unwrap();
         Timer::after_millis(500).await;
         display.clear(BinaryColor::Off).await.unwrap();
-        Timer::after_millis(500).await;
+        Timer::after_millis(1000).await;
     }
 }
 
@@ -93,7 +93,7 @@ async fn main(spawner: Spawner) {
     Timer::after_millis(500).await;
     shared_display
         .flush_loop(async |d, buffer| {
-            d.pixels = buffer.into();
+            d.pixels = buffer.into_boxed_slice();
             window.update(d);
             if window.events().any(|e| e == SimulatorEvent::Quit) {
                 return FlushResult::Abort;

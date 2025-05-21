@@ -157,7 +157,6 @@ where
     {
         FlushLock::new()
             .protect_write(|| {
-                let len_before = self.buffer.len();
                 let self_area = self.area;
                 let self_offset = self_area.top_left;
                 pixels
@@ -169,15 +168,26 @@ where
                 if self.check_rle().is_err() {
                     panic!("after draw_iter check rle failed");
                 }
-                println!(
-                    "after draw_iter, buffer num runs {}->{}",
-                    len_before,
-                    self.buffer.len(),
-                );
             })
             .await;
         Ok(())
     }
 
-    // TODO: implement fill_contiguous, fill_solid efficiently
+    // TODO: implement clear, fill_contiguous, fill_solid efficiently
+    async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        // empty vector
+        self.buffer.clear();
+        // re-fill vector
+        let new_value = D::map_to_buffer_element(color);
+        let num_pixels = self.area.size.width * self.area.size.height;
+        let full_runs = num_pixels / 255;
+        for _ in 0..full_runs {
+            self.buffer.push((new_value, 255));
+        }
+        let remainder = num_pixels - (full_runs * 255);
+        if remainder > 0 {
+            self.buffer.push((new_value, remainder.try_into().unwrap()));
+        }
+        Ok(())
+    }
 }

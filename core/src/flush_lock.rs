@@ -47,7 +47,6 @@ impl FlushLock {
     where
         F: AsyncFnOnce() -> R,
     {
-        println!("protecting a flush!");
         self.lock_flush().await;
         // TODO: make sure unlock is called even if f panics?
         let result = f().await;
