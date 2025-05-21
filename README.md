@@ -13,6 +13,8 @@ For the simulator to work, SDL2 has to be installed, as described in the [simula
 cargo run --example hello_world
 ```
 
+For an example on the Raspberry Pi Pico, see [`examples/rp2040`](./examples/rp2040).
+
 ## How to add support for a new display type
 
 In order to use any display, all that is required is to implement the `SharableBufferedDisplay` trait for the display type.
