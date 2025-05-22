@@ -72,6 +72,7 @@ pub enum PartitioningError {
 pub struct DisplayPartition<B, D: ?Sized> {
     pub buffer: *mut B,
     buffer_len: usize,
+
     pub parent_size: Size,
     pub area: Rectangle,
     _display: core::marker::PhantomData<D>,
