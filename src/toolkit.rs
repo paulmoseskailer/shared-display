@@ -9,7 +9,7 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channe
 use embassy_time::{Duration, Timer};
 use embedded_graphics::{
     geometry::{Point, Size},
-    prelude::Dimensions,
+    prelude::*,
     primitives::Rectangle,
 };
 use static_cell::StaticCell;
@@ -200,16 +200,22 @@ where
 /* ------------------- SHARED COMPRESSED DISPLAY ---------------------- */
 pub struct SharedCompressedDisplay<D: CompressableDisplay> {
     pub real_display: Mutex<CriticalSectionRawMutex, D>,
-    bounding_box: Rectangle,
+    size: Size,
     partition_areas: heapless::Vec<Rectangle, MAX_APPS_PER_SCREEN>,
     buffer_pointers: heapless::Vec<*const Vec<(D::BufferElement, u8)>, MAX_APPS_PER_SCREEN>,
 
     spawner: &'static Spawner,
 }
 
-impl<D: CompressableDisplay> Dimensions for SharedCompressedDisplay<D> {
-    fn bounding_box(&self) -> Rectangle {
-        self.bounding_box
+impl<D: CompressableDisplay> OriginDimensions for SharedCompressedDisplay<D> {
+    fn size(&self) -> Size {
+        self.size
+    }
+}
+
+impl<D: CompressableDisplay> ContainsPoint for SharedCompressedDisplay<D> {
+    fn contains(&self, point: Point) -> bool {
+        self.bounding_box().contains(point)
     }
 }
 
@@ -219,11 +225,11 @@ where
 {
     pub fn new(mut real_display: D, spawner: Spawner) -> Self {
         let spawner_ref: &'static Spawner = SPAWNER.init(spawner);
+        let size = real_display.bounding_box().size;
         real_display.drop_buffer();
-        let bounding_box = real_display.bounding_box();
         SharedCompressedDisplay {
             real_display: Mutex::new(real_display),
-            bounding_box,
+            size,
             partition_areas: heapless::Vec::new(),
             buffer_pointers: heapless::Vec::new(),
             spawner: spawner_ref,
@@ -237,8 +243,20 @@ where
         if area.size.width < 8 {
             return Err(PartitioningError::PartitionTooSmall);
         }
-        // TODO: sanity checks on area
-        let partition = CompressedDisplayPartition::new(self.bounding_box.size, area);
+        // check area inside display
+        if !(self.contains(area.top_left)
+            && self.contains(area.bottom_right().unwrap_or(area.top_left)))
+        {
+            return Err(PartitioningError::OutsideParent);
+        }
+
+        // check area not overlapping with existing partition_areas
+        for p in self.partition_areas.iter() {
+            if p.intersection(&area).size != Size::new(0, 0) {
+                return Err(PartitioningError::Overlaps);
+            }
+        }
+        let partition = CompressedDisplayPartition::new(self.size, area);
         self.buffer_pointers
             .push(partition.get_ptr_to_buffer())
             .unwrap();
@@ -307,8 +325,8 @@ where
                 Vec::with_capacity(2 * partition_buffers[0].len());
 
             // combine one row of each partition per row of entire_buffer
-            let screen_height = self.bounding_box.size.height as usize;
-            let screen_width = self.bounding_box.size.width as usize;
+            let screen_height = self.size.height as usize;
+            let screen_width = self.size.width as usize;
 
             let partition_resolution = screen_width * screen_height / 2;
             assert_eq!(partition_buffers[0].len(), partition_resolution);

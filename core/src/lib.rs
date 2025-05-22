@@ -80,10 +80,9 @@ pub struct DisplayPartition<B, D: ?Sized> {
     draw_tracker: &'static DrawTracker,
 }
 
-impl<C, B, D> ContainsPoint for DisplayPartition<B, D>
+impl<B, D> ContainsPoint for DisplayPartition<B, D>
 where
-    C: PixelColor,
-    D: SharableBufferedDisplay<BufferElement = B, Color = C> + ?Sized,
+    D: ?Sized,
 {
     fn contains(&self, p: Point) -> bool {
         self.area.contains(p)
