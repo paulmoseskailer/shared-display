@@ -9,6 +9,7 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channe
 use embassy_time::{Duration, Timer};
 use embedded_graphics::{
     geometry::{Point, Size},
+    prelude::Dimensions,
     primitives::Rectangle,
 };
 use static_cell::StaticCell;
@@ -196,69 +197,35 @@ where
     return AppStart::Success;
 }
 
-/* --------------------- COMPRESSED VERSION ------------------ */
-
-/* ---------------------- WRAPPER STRUCT ------------------------ */
-pub struct CompressedDisplay<D: CompressableDisplay> {
-    pub display: D,
-    buffer_pointers: heapless::Vec<*const Vec<(D::BufferElement, u8)>, MAX_APPS_PER_SCREEN>,
-}
-
-impl<D: CompressableDisplay> CompressedDisplay<D> {
-    pub fn new(mut display: D) -> Self {
-        display.drop_buffer();
-        Self {
-            display,
-            buffer_pointers: heapless::Vec::new(),
-        }
-    }
-
-    fn resolution(&self) -> usize {
-        let bb_size = self.display.bounding_box().size;
-        (bb_size.width * bb_size.height) as usize
-    }
-
-    pub fn new_partition(
-        &mut self,
-        area: Rectangle,
-    ) -> Result<CompressedDisplayPartition<D::BufferElement, D>, PartitioningError> {
-        if area.size.width < 8 {
-            return Err(PartitioningError::PartitionTooSmall);
-        }
-
-        let parent_size = self.display.bounding_box().size;
-
-        // TODO: sanity checks on area
-        let partition = CompressedDisplayPartition::new(parent_size, area);
-        self.buffer_pointers
-            .push(partition.get_ptr_to_buffer())
-            .unwrap();
-
-        Ok(partition)
-    }
-}
-
 /* ------------------- SHARED COMPRESSED DISPLAY ---------------------- */
 pub struct SharedCompressedDisplay<D: CompressableDisplay> {
-    pub real_display: Mutex<CriticalSectionRawMutex, CompressedDisplay<D>>,
-    resolution: usize,
+    pub real_display: Mutex<CriticalSectionRawMutex, D>,
+    bounding_box: Rectangle,
     partition_areas: heapless::Vec<Rectangle, MAX_APPS_PER_SCREEN>,
+    buffer_pointers: heapless::Vec<*const Vec<(D::BufferElement, u8)>, MAX_APPS_PER_SCREEN>,
 
     spawner: &'static Spawner,
+}
+
+impl<D: CompressableDisplay> Dimensions for SharedCompressedDisplay<D> {
+    fn bounding_box(&self) -> Rectangle {
+        self.bounding_box
+    }
 }
 
 impl<B, D> SharedCompressedDisplay<D>
 where
     D: CompressableDisplay<BufferElement = B>,
 {
-    pub fn new(real_display: D, spawner: Spawner) -> Self {
+    pub fn new(mut real_display: D, spawner: Spawner) -> Self {
         let spawner_ref: &'static Spawner = SPAWNER.init(spawner);
-        let compressed_display = CompressedDisplay::new(real_display);
-        let resolution = compressed_display.resolution();
+        real_display.drop_buffer();
+        let bounding_box = real_display.bounding_box();
         SharedCompressedDisplay {
-            real_display: Mutex::new(compressed_display),
-            resolution,
+            real_display: Mutex::new(real_display),
+            bounding_box,
             partition_areas: heapless::Vec::new(),
+            buffer_pointers: heapless::Vec::new(),
             spawner: spawner_ref,
         }
     }
@@ -267,14 +234,18 @@ where
         &mut self,
         area: Rectangle,
     ) -> Result<CompressedDisplayPartition<B, D>, PartitioningError> {
-        let display: &mut CompressedDisplay<D> = &mut *self.real_display.lock().await;
-        let result = display.new_partition(area);
-
-        if result.is_ok() {
-            self.partition_areas.push(area.clone()).unwrap();
+        if area.size.width < 8 {
+            return Err(PartitioningError::PartitionTooSmall);
         }
+        // TODO: sanity checks on area
+        let partition = CompressedDisplayPartition::new(self.bounding_box.size, area);
+        self.buffer_pointers
+            .push(partition.get_ptr_to_buffer())
+            .unwrap();
 
-        result
+        self.partition_areas.push(area.clone()).unwrap();
+
+        Ok(partition)
     }
 
     pub async fn launch_new_app<F>(
@@ -302,20 +273,10 @@ where
         'flush_loop: loop {
             let mut partition_buffers: Vec<Vec<D::BufferElement>> =
                 Vec::with_capacity(self.partition_areas.len());
-            assert_eq!(
-                self.partition_areas.len(),
-                self.real_display.lock().await.buffer_pointers.len()
-            );
+            assert_eq!(self.partition_areas.len(), self.buffer_pointers.len());
 
             // decompress every partition's buffer
-            for (buffer, &ptr) in self
-                .real_display
-                .lock()
-                .await
-                .buffer_pointers
-                .iter()
-                .enumerate()
-            {
+            for (buffer, &ptr) in self.buffer_pointers.iter().enumerate() {
                 if ptr.is_null() {
                     panic!("found null ptr in CompressedDisplay.buffer_pointers!");
                 }
@@ -346,9 +307,8 @@ where
                 Vec::with_capacity(2 * partition_buffers[0].len());
 
             // combine one row of each partition per row of entire_buffer
-            let display_size = self.real_display.lock().await.display.bounding_box().size;
-            let screen_height = display_size.height as usize;
-            let screen_width = display_size.width as usize;
+            let screen_height = self.bounding_box.size.height as usize;
+            let screen_width = self.bounding_box.size.width as usize;
 
             let partition_resolution = screen_width * screen_height / 2;
             assert_eq!(partition_buffers[0].len(), partition_resolution);
@@ -361,11 +321,11 @@ where
                 entire_buffer.extend_from_slice(&partition_buffers[1][start..end]);
             }
 
-            assert_eq!(entire_buffer.len(), self.resolution);
+            assert_eq!(entire_buffer.len(), screen_width * screen_height);
 
             let flush_result = FlushLock::new()
                 .protect_flush(async || {
-                    flush_fn(&mut self.real_display.lock().await.display, entire_buffer).await
+                    flush_fn(&mut *self.real_display.lock().await, entire_buffer).await
                 })
                 .await;
             match flush_result {
