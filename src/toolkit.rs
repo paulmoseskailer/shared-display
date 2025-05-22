@@ -294,61 +294,11 @@ where
         F: AsyncFnMut(&mut D, Vec<D::BufferElement>) -> FlushResult,
     {
         'outer: loop {
-            let mut partition_buffers: Vec<Vec<D::BufferElement>> =
-                Vec::with_capacity(self.partition_areas.len());
-            assert_eq!(self.partition_areas.len(), self.buffer_pointers.len());
-
-            // decompress every partition's buffer
-            for (buffer, &ptr) in self.buffer_pointers.iter().enumerate() {
-                if ptr.is_null() {
-                    panic!("found null ptr in CompressedDisplay.buffer_pointers!");
-                }
-                // SAFETY: We assume these pointers are valid and point to `Vec<(D::BufferElement, u8)>`.
-                let rle_buffer: &Vec<(D::BufferElement, u8)> = unsafe { &*ptr };
-
-                let partition_area = self.partition_areas[buffer];
-                let partition_resolution =
-                    (partition_area.size.width * partition_area.size.height) as usize;
-                partition_buffers.push(Vec::with_capacity(partition_resolution));
-
-                let mut decompressed_index: usize = 0;
-                for &(value, run_len) in rle_buffer {
-                    // TODO: extend from slice instead of pushing every time
-                    for _ in 0..run_len {
-                        partition_buffers[buffer].push(value);
-                    }
-                    decompressed_index += run_len as usize;
-                }
-                assert_eq!(decompressed_index, partition_resolution);
-            }
-
-            // combine partition buffers to one single buffer
-            // TODO: take different splitting into account, correctly piece together partitions
-            assert_eq!(partition_buffers.len(), 2);
-            assert_eq!(partition_buffers[0].len(), partition_buffers[1].len());
-            let mut entire_buffer: Vec<D::BufferElement> =
-                Vec::with_capacity(2 * partition_buffers[0].len());
-
-            // combine one row of each partition per row of entire_buffer
-            let screen_height = self.size.height as usize;
-            let screen_width = self.size.width as usize;
-
-            let partition_resolution = screen_width * screen_height / 2;
-            assert_eq!(partition_buffers[0].len(), partition_resolution);
-            assert_eq!(partition_buffers[1].len(), partition_resolution);
-
-            for row in 0..screen_height {
-                let start = row * (screen_width / 2);
-                let end = start + (screen_width / 2);
-                entire_buffer.extend_from_slice(&partition_buffers[0][start..end]);
-                entire_buffer.extend_from_slice(&partition_buffers[1][start..end]);
-            }
-
-            assert_eq!(entire_buffer.len(), screen_width * screen_height);
+            let decompressed_buffer = self.decompress_all_buffers();
 
             let flush_result = FlushLock::new()
                 .protect_flush(async || {
-                    flush_fn(&mut *self.real_display.lock().await, entire_buffer).await
+                    flush_fn(&mut *self.real_display.lock().await, decompressed_buffer).await
                 })
                 .await;
             match flush_result {
@@ -360,5 +310,66 @@ where
 
             Timer::after(FLUSH_INTERVAL).await;
         }
+    }
+
+    fn decompress_all_buffers(&self) -> Vec<B> {
+        let mut partition_buffers: Vec<Vec<D::BufferElement>> =
+            Vec::with_capacity(self.partition_areas.len());
+        assert_eq!(self.partition_areas.len(), self.buffer_pointers.len());
+
+        // decompress every partition's buffer
+        for i in 0..self.buffer_pointers.len() {
+            partition_buffers.push(self.decompress_ith_buffer(i));
+        }
+
+        // combine partition buffers to one single buffer
+        // TODO: take different splitting into account, correctly piece together partitions
+        assert_eq!(partition_buffers.len(), 2);
+        assert_eq!(partition_buffers[0].len(), partition_buffers[1].len());
+        let mut entire_buffer: Vec<D::BufferElement> =
+            Vec::with_capacity(2 * partition_buffers[0].len());
+
+        // combine one row of each partition per row of entire_buffer
+        let screen_height = self.size.height as usize;
+        let screen_width = self.size.width as usize;
+
+        let partition_resolution = screen_width * screen_height / 2;
+        assert_eq!(partition_buffers[0].len(), partition_resolution);
+        assert_eq!(partition_buffers[1].len(), partition_resolution);
+
+        for row in 0..screen_height {
+            let start = row * (screen_width / 2);
+            let end = start + (screen_width / 2);
+            entire_buffer.extend_from_slice(&partition_buffers[0][start..end]);
+            entire_buffer.extend_from_slice(&partition_buffers[1][start..end]);
+        }
+
+        assert_eq!(entire_buffer.len(), screen_width * screen_height);
+        entire_buffer
+    }
+
+    fn decompress_ith_buffer(&self, i: usize) -> Vec<B> {
+        let ptr = self.buffer_pointers[i];
+        if ptr.is_null() {
+            panic!("found null ptr in SharedCompressedDisplay.buffer_pointers!");
+        }
+        // SAFETY: We assume these pointers are valid and point to `Vec<(D::BufferElement, u8)>`.
+        let rle_buffer: &Vec<(D::BufferElement, u8)> = unsafe { &*ptr };
+
+        let partition_area = self.partition_areas[i];
+        let partition_resolution =
+            (partition_area.size.width * partition_area.size.height) as usize;
+        let mut result = Vec::with_capacity(partition_resolution);
+
+        let mut decompressed_index: usize = 0;
+        for &(value, run_len) in rle_buffer {
+            // TODO: extend from slice instead of pushing every time
+            for _ in 0..run_len {
+                result.push(value);
+            }
+            decompressed_index += run_len as usize;
+        }
+        assert_eq!(decompressed_index, partition_resolution);
+        result
     }
 }
