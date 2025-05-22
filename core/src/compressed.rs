@@ -179,32 +179,78 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
             panic!("set_pixel: did not find run to break up");
         }
 
-        // TODO: merge runs if possible
-        let (buffer_before_ref, run_len_before) = &self.inner[run_index];
-        if new_value == *buffer_before_ref {
+        let (buffer_value_previously, run_len_previously) = &self.inner[run_index];
+        if new_value == *buffer_value_previously {
+            // nothing to do, color already set
             return;
         }
-        let (buffer_before, run_len_before) = (*buffer_before_ref, *run_len_before);
+        let (buffer_previously, run_len_previously) =
+            (*buffer_value_previously, *run_len_previously);
 
         let run_before_len = target_index - current_index;
-        let run_after_len = (current_index + run_len_before as usize) - (target_index + 1);
+        let run_after_len = (current_index + run_len_previously as usize) - (target_index + 1);
+
         let have_run_before = run_before_len > 0;
+        let have_run_after = run_after_len > 0;
+        // check if we can merge with previous run
+        if !have_run_before && run_index > 0 {
+            let (color_before, run_len_before) = &self.inner[run_index - 1];
+            if *color_before == new_value && *run_len_before < 255 {
+                // add current pixel to previous run
+                self.inner[run_index - 1].1 += 1;
+                self.inner[run_index].1 -= 1;
+                if self.inner[run_index].1 == 0 {
+                    // remove run
+                    self.inner.remove(run_index);
+                    // possibly merge run after
+                    if run_index < self.inner.len() {
+                        let (color_after, run_len_after) = &self.inner[run_index];
+                        let combined_len =
+                            self.inner[run_index - 1].1.saturating_add(*run_len_after);
+                        if combined_len < 255 && *color_after == new_value {
+                            self.inner[run_index - 1].1 = combined_len;
+                            self.inner.remove(run_index);
+                        }
+                    }
+                }
+                return;
+            }
+        }
+
+        // check if we can merge with next run
+        if !have_run_after && run_index < (self.inner.len() - 1) {
+            let (color_after, run_len_after) = &self.inner[run_index + 1];
+            if *color_after == new_value && *run_len_after < 255 {
+                self.inner[run_index + 1].1 += 1;
+                self.inner[run_index].1 -= 1;
+                if self.inner[run_index].1 == 0 {
+                    self.inner.remove(run_index);
+                }
+                return;
+            }
+        }
+
         // new pixel
         self.inner[run_index] = (new_value, 1);
         if have_run_before {
             self.inner.insert(
                 run_index,
-                (buffer_before, run_before_len.try_into().unwrap()),
+                (buffer_previously, run_before_len.try_into().unwrap()),
             );
         }
         if run_after_len > 0 {
             let index = run_index + 1 + have_run_before as usize;
-            self.inner
-                .insert(index, (buffer_before, run_after_len.try_into().unwrap()));
+            self.inner.insert(
+                index,
+                (buffer_previously, run_after_len.try_into().unwrap()),
+            );
         }
 
         if self.check_integrity().is_err() {
-            panic!("set_at_index({}) check_integrity failed", target_index);
+            panic!(
+                "after set_at_index({}) check_integrity failed",
+                target_index
+            );
         }
     }
 
@@ -221,5 +267,83 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
         if remainder > 0 {
             self.inner.push((new_value, remainder.try_into().unwrap()));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CompressedBuffer;
+    use embedded_graphics::prelude::*;
+
+    #[test]
+    fn test_clear() {
+        let size = Size::new(128, 4); // 512 pixels total
+        let mut buffer = CompressedBuffer::<u8>::new(size, 45);
+        buffer.check_integrity().unwrap();
+
+        buffer.clear_and_refill(255);
+        assert_eq!(
+            buffer.inner,
+            Box::new(vec![(255, 255), (255, 255), (255, 2)])
+        );
+    }
+
+    #[test]
+    fn test_merge_before() {
+        let size = Size::new(4, 4); // 16 pixels total
+        let mut buffer = CompressedBuffer::<u8>::new(size, 30);
+        buffer.check_integrity().unwrap();
+
+        buffer.set_at_index(2, 52);
+        assert_eq!(buffer.inner, Box::new(vec![(30, 2), (52, 1), (30, 13)]));
+
+        buffer.set_at_index(3, 52);
+        assert_eq!(buffer.inner, Box::new(vec![(30, 2), (52, 2), (30, 12)]));
+    }
+
+    #[test]
+    fn test_merge_after() {
+        let size = Size::new(4, 4); // 16 pixels total
+        let mut buffer = CompressedBuffer::<u8>::new(size, 30);
+        buffer.check_integrity().unwrap();
+
+        buffer.set_at_index(2, 52);
+        assert_eq!(buffer.inner, Box::new(vec![(30, 2), (52, 1), (30, 13)]));
+
+        buffer.set_at_index(1, 52);
+        assert_eq!(buffer.inner, Box::new(vec![(30, 1), (52, 2), (30, 13)]));
+    }
+
+    #[test]
+    fn test_merge_before_and_after() {
+        let size = Size::new(128, 2); // 256 pixels total
+        let mut buffer = CompressedBuffer::<u8>::new(size, 0);
+        buffer.check_integrity().unwrap();
+        assert_eq!(buffer.inner, Box::new(vec![(0, 255), (0, 1)]));
+
+        buffer.set_at_index(0, 27);
+        assert_eq!(buffer.inner, Box::new(vec![(27, 1), (0, 254), (0, 1)]));
+
+        buffer.set_at_index(2, 27);
+        assert_eq!(
+            buffer.inner,
+            Box::new(vec![(27, 1), (0, 1), (27, 1), (0, 252), (0, 1)])
+        );
+
+        buffer.set_at_index(1, 27);
+        assert_eq!(buffer.inner, Box::new(vec![(27, 3), (0, 252), (0, 1)]));
+    }
+
+    #[test]
+    fn test_no_merge_over_255() {
+        let size = Size::new(257, 1);
+        let mut buffer = CompressedBuffer::<u8>::new(size, 0);
+        buffer.check_integrity().unwrap();
+        assert_eq!(buffer.inner, Box::new(vec![(0, 255), (0, 2)]));
+        buffer.set_at_index(254, 3);
+
+        assert_eq!(buffer.inner, Box::new(vec![(0, 254), (3, 1), (0, 2)]));
+        buffer.set_at_index(254, 0);
+        assert_eq!(buffer.inner, Box::new(vec![(0, 255), (0, 2)]));
     }
 }

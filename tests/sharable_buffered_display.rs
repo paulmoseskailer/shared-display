@@ -7,7 +7,7 @@ use embedded_graphics::{
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
 };
-use shared_display_core::{DrawTracker, PartitioningError, SharableBufferedDisplay};
+use shared_display_core::{DisplaySidePartitioningError, DrawTracker, SharableBufferedDisplay};
 
 const DISP_WIDTH: usize = 16;
 const DISP_HEIGHT: usize = 2;
@@ -85,7 +85,7 @@ impl SharableBufferedDisplay for FakeDisplay {
 }
 
 #[tokio::test]
-async fn simple_split_clear() -> Result<(), PartitioningError> {
+async fn simple_split_clear() -> Result<(), DisplaySidePartitioningError> {
     let buffer = [0; NUM_PIXELS];
     let mut d = FakeDisplay { buffer };
     assert_eq!(*d.flush(), [0; NUM_PIXELS]);
@@ -113,7 +113,7 @@ async fn simple_split_clear() -> Result<(), PartitioningError> {
 }
 
 #[tokio::test]
-async fn simple_split_draw_iter() -> Result<(), PartitioningError> {
+async fn simple_split_draw_iter() -> Result<(), DisplaySidePartitioningError> {
     let buffer = [0; NUM_PIXELS];
     let mut d = FakeDisplay { buffer };
     assert_eq!(*d.flush(), [0; NUM_PIXELS]);
