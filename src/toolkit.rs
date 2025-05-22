@@ -15,8 +15,8 @@ use embedded_graphics::{
 use static_cell::StaticCell;
 
 use shared_display_core::{
-    AreaToFlush, DisplayPartition, DrawTracker, FlushLock, MAX_APPS_PER_SCREEN, PartitioningError,
-    SharableBufferedDisplay,
+    AreaToFlush, DisplayPartition, DisplaySidePartitioningError, DrawTracker, FlushLock,
+    MAX_APPS_PER_SCREEN, SharableBufferedDisplay,
     compressed::{CompressableDisplay, CompressedDisplayPartition},
 };
 
@@ -26,6 +26,13 @@ pub static EVENTS: Channel<CriticalSectionRawMutex, ResizeEvent, EVENT_QUEUE_SIZ
 static SPAWNER: StaticCell<Spawner> = StaticCell::new();
 static DRAW_TRACKERS: [DrawTracker; MAX_APPS_PER_SCREEN] =
     [const { DrawTracker::new() }; MAX_APPS_PER_SCREEN];
+
+#[derive(Debug)]
+pub enum NewPartitionError {
+    Overlaps,
+    OutsideParent,
+    DisplaySide(DisplaySidePartitioningError),
+}
 
 pub enum AppStart {
     Success,
@@ -67,7 +74,7 @@ where
     async fn new_partition(
         &mut self,
         area: Rectangle,
-    ) -> Result<DisplayPartition<B, D>, PartitioningError> {
+    ) -> Result<DisplayPartition<B, D>, NewPartitionError> {
         let real_display: &mut D = &mut *self.real_display.lock().await;
 
         // check area inside display
@@ -75,13 +82,13 @@ where
         if !(bb.contains(area.top_left)
             && bb.contains(area.bottom_right().unwrap_or(area.top_left)))
         {
-            return Err(PartitioningError::OutsideParent);
+            return Err(NewPartitionError::OutsideParent);
         }
 
         // check area not overlapping with existing partition_areas
         for p in self.partition_areas.iter() {
             if p.intersection(&area).size != Size::new(0, 0) {
-                return Err(PartitioningError::Overlaps);
+                return Err(NewPartitionError::Overlaps);
             }
         }
 
@@ -92,12 +99,12 @@ where
             self.partition_areas.push(area.clone()).unwrap();
         }
 
-        result
+        result.map_err(NewPartitionError::DisplaySide)
     }
 
     pub async fn partition_vertically(
         &mut self,
-    ) -> Result<(DisplayPartition<B, D>, DisplayPartition<B, D>), PartitioningError> {
+    ) -> Result<(DisplayPartition<B, D>, DisplayPartition<B, D>), NewPartitionError> {
         let total_area = self.real_display.lock().await.bounding_box();
         let half_size = Size::new(total_area.size.width / 2, total_area.size.height);
         let left_area = Rectangle::new(total_area.top_left, half_size);
@@ -119,7 +126,7 @@ where
         &mut self,
         mut app_fn: F,
         area: Rectangle,
-    ) -> Result<(), PartitioningError>
+    ) -> Result<(), NewPartitionError>
     where
         F: AsyncFnMut(DisplayPartition<B, D>) -> (),
         for<'b> F::CallRefFuture<'b>: 'static,
@@ -137,7 +144,7 @@ where
         &mut self,
         mut app_fn: F,
         area: Rectangle,
-    ) -> Result<(), PartitioningError>
+    ) -> Result<(), NewPartitionError>
     where
         F: AsyncFnMut(DisplayPartition<B, D>, &'static Spawner) -> (),
         for<'b> F::CallRefFuture<'b>: 'static,
@@ -239,24 +246,22 @@ where
     async fn new_partition(
         &mut self,
         area: Rectangle,
-    ) -> Result<CompressedDisplayPartition<B, D>, PartitioningError> {
-        if area.size.width < 8 {
-            return Err(PartitioningError::PartitionTooSmall);
-        }
+    ) -> Result<CompressedDisplayPartition<B, D>, NewPartitionError> {
         // check area inside display
         if !(self.contains(area.top_left)
             && self.contains(area.bottom_right().unwrap_or(area.top_left)))
         {
-            return Err(PartitioningError::OutsideParent);
+            return Err(NewPartitionError::OutsideParent);
         }
 
         // check area not overlapping with existing partition_areas
         for p in self.partition_areas.iter() {
             if p.intersection(&area).size != Size::new(0, 0) {
-                return Err(PartitioningError::Overlaps);
+                return Err(NewPartitionError::Overlaps);
             }
         }
-        let partition = CompressedDisplayPartition::new(self.size, area);
+        let partition = CompressedDisplayPartition::new(self.size, area)
+            .map_err(NewPartitionError::DisplaySide)?;
         self.buffer_pointers
             .push(partition.get_ptr_to_buffer())
             .unwrap();
@@ -270,7 +275,7 @@ where
         &mut self,
         mut app_fn: F,
         area: Rectangle,
-    ) -> Result<(), PartitioningError>
+    ) -> Result<(), NewPartitionError>
     where
         F: AsyncFnMut(CompressedDisplayPartition<B, D>) -> (),
         for<'b> F::CallRefFuture<'b>: 'static,
@@ -288,7 +293,7 @@ where
     where
         F: AsyncFnMut(&mut D, Vec<D::BufferElement>) -> FlushResult,
     {
-        'flush_loop: loop {
+        'outer: loop {
             let mut partition_buffers: Vec<Vec<D::BufferElement>> =
                 Vec::with_capacity(self.partition_areas.len());
             assert_eq!(self.partition_areas.len(), self.buffer_pointers.len());
@@ -349,7 +354,7 @@ where
             match flush_result {
                 FlushResult::Continue => {}
                 FlushResult::Abort => {
-                    break 'flush_loop;
+                    break 'outer;
                 }
             }
 

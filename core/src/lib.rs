@@ -18,6 +18,15 @@ use embedded_graphics::{
 };
 
 pub const MAX_APPS_PER_SCREEN: usize = 8;
+#[derive(Debug)]
+pub enum DisplaySidePartitioningError {
+    // cannot create partitions less than 8 pixels wide
+    PartitionTooSmall,
+    // display width must be divisible by both pixels as well as buffer elements
+    BufferPixelMismatch,
+    // a partition should have width divisible by 8
+    PartitionBadWidth,
+}
 
 pub trait SharableBufferedDisplay: DrawTarget {
     type BufferElement;
@@ -32,20 +41,20 @@ pub trait SharableBufferedDisplay: DrawTarget {
         &mut self,
         area: Rectangle,
         draw_tracker: &'static DrawTracker,
-    ) -> Result<DisplayPartition<Self::BufferElement, Self>, PartitioningError> {
+    ) -> Result<DisplayPartition<Self::BufferElement, Self>, DisplaySidePartitioningError> {
         if area.size.width < 8 {
-            return Err(PartitioningError::PartitionTooSmall);
+            return Err(DisplaySidePartitioningError::PartitionTooSmall);
         }
 
         let parent_size = self.bounding_box().size;
         let buffer_len = self.get_buffer().len();
         let pixels_per_buffer_el = (parent_size.width * parent_size.height) as usize / buffer_len;
         if pixels_per_buffer_el > 0 && parent_size.width % pixels_per_buffer_el as u32 != 0 {
-            return Err(PartitioningError::BufferPixelMismatch);
+            return Err(DisplaySidePartitioningError::BufferPixelMismatch);
         }
 
         if area.size.width % 8 != 0 {
-            return Err(PartitioningError::PartitionBadWidth);
+            return Err(DisplaySidePartitioningError::PartitionBadWidth);
         }
 
         Ok(DisplayPartition::new(
@@ -55,18 +64,6 @@ pub trait SharableBufferedDisplay: DrawTarget {
             draw_tracker,
         ))
     }
-}
-
-#[derive(Debug)]
-pub enum PartitioningError {
-    // cannot create partitions less than 8 pixels wide
-    PartitionTooSmall,
-    // display width must be divisible by both pixels as well as buffer elements
-    BufferPixelMismatch,
-    // a partition should have width divisible by 8
-    PartitionBadWidth,
-    OutsideParent,
-    Overlaps,
 }
 
 pub struct DisplayPartition<B, D: ?Sized> {
@@ -112,7 +109,8 @@ where
 
     pub fn split_vertically(
         &mut self,
-    ) -> Result<(DisplayPartition<B, D>, DisplayPartition<B, D>), PartitioningError> {
+    ) -> Result<(DisplayPartition<B, D>, DisplayPartition<B, D>), DisplaySidePartitioningError>
+    {
         let size = self.area.size;
 
         // ensure no bytes are split in half by rounding to a split of width multiple of 8
@@ -124,13 +122,13 @@ where
         );
 
         if left_area_width < 8 || size.width - left_area_width < 8 {
-            return Err(PartitioningError::PartitionTooSmall);
+            return Err(DisplaySidePartitioningError::PartitionTooSmall);
         }
 
         let pixels_per_buffer_el =
             (self.parent_size.width * self.parent_size.height) as usize / self.buffer_len;
         if pixels_per_buffer_el > 0 && self.parent_size.width % pixels_per_buffer_el as u32 != 0 {
-            return Err(PartitioningError::BufferPixelMismatch);
+            return Err(DisplaySidePartitioningError::BufferPixelMismatch);
         }
 
         Ok((

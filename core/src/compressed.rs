@@ -13,7 +13,7 @@ extern crate alloc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::{SharableBufferedDisplay, flush_lock::FlushLock};
+use crate::{DisplaySidePartitioningError, SharableBufferedDisplay, flush_lock::FlushLock};
 
 pub trait CompressableDisplay:
     SharableBufferedDisplay<BufferElement: Copy + PartialEq + Default>
@@ -56,13 +56,23 @@ where
     B: Copy + core::cmp::PartialEq,
     D: CompressableDisplay<BufferElement = B, Color = C> + ?Sized,
 {
-    pub fn new(parent_size: Size, area: Rectangle) -> CompressedDisplayPartition<B, D> {
-        CompressedDisplayPartition {
+    pub fn new(
+        parent_size: Size,
+        area: Rectangle,
+    ) -> Result<CompressedDisplayPartition<B, D>, DisplaySidePartitioningError> {
+        if area.size.width < 8 {
+            return Err(DisplaySidePartitioningError::PartitionTooSmall);
+        }
+        if area.size.width % 8 != 0 {
+            return Err(DisplaySidePartitioningError::PartitionBadWidth);
+        }
+
+        Ok(CompressedDisplayPartition {
             buffer: CompressedBuffer::new(area.size, B::default()),
             parent_size,
             area,
             _display: core::marker::PhantomData,
-        }
+        })
     }
 
     pub fn envelope(&mut self, other: &Rectangle) {
