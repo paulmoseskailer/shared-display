@@ -1,0 +1,43 @@
+[package]
+edition = "2024"
+name = "rp2040-helloworld"
+version = "0.1.0"
+
+
+[dependencies]
+embassy-sync = { version = "0.6.2",  features = ["defmt"] }
+embassy-executor = { version = "0.7.0",  features = ["task-arena-size-98304", "arch-cortex-m", "executor-thread", "defmt"] }
+embassy-time = { version = "0.4.0",  features = ["defmt", "defmt-timestamp-uptime"] }
+embassy-rp = { version = "0.4.0",  features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
+embassy-embedded-hal = { version = "0.3.0", features = ["defmt"] }
+cortex-m-rt = "0.7.0"
+embedded-alloc = { version = "0.6.0" }
+static_cell = "2.1.0"
+
+embedded-graphics = { version = "0.8.1", default-features = false, features = ["async_draw"] }
+
+defmt = "0.3"
+defmt-rtt = "0.4"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+
+ssd1351 = { version = "0.5.0", features = ["buffered"] }
+
+shared-display = { path = "../.." }
+
+[dependencies.portable-atomic]
+version = "1.11.0"
+features = ["critical-section"]
+
+[patch.crates-io]
+ssd1351 = { git = "https://github.com/paulmoseskailer/ssd1351.git", branch = "async_draw" }
+embedded-graphics = { git = "https://github.com/paulmoseskailer/embedded-graphics.git" }
+embedded-graphics-core = { git = "https://github.com/paulmoseskailer/embedded-graphics.git" }
+
+[profile.release]
+debug = true
+lto = true
+opt-level = "s"
+
+[profile.dev]
+debug = true
+opt-level = "s"
