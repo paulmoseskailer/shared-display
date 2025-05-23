@@ -10,6 +10,7 @@ use embedded_graphics::{
 
 // requires embedded-alloc for no_std
 extern crate alloc;
+use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -157,10 +158,6 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
         if actual_len == decompressed_buffer_len as u64 {
             return Ok(());
         }
-        println!(
-            "RLE ({} runs) encodes {actual_len} pixels != resolution {decompressed_buffer_len}",
-            self.inner.len()
-        );
         return Err(());
     }
 
