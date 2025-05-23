@@ -1,9 +1,9 @@
 #![allow(async_fn_in_trait)]
 extern crate alloc;
 use alloc::boxed::Box;
+use alloc::{vec, vec::Vec};
 
-use core::future::Future;
-use core::pin::Pin;
+use core::{future::Future, pin::Pin};
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
 use embassy_time::{Duration, Timer};
