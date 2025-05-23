@@ -16,12 +16,15 @@ use shared_display_core::compressed::CompressedDisplayPartition;
 
 type DisplayType = SimulatorDisplay<BinaryColor>;
 
+const SCREEN_WIDTH: usize = 128;
+const SCREEN_HEIGHT: usize = SCREEN_WIDTH / 2;
+
 fn init_simulator_display() -> (DisplayType, Window) {
     let output_settings = OutputSettingsBuilder::new()
         .theme(BinaryColorTheme::OledWhite)
         .build();
     (
-        SimulatorDisplay::new(Size::new(128, 64)),
+        SimulatorDisplay::new(Size::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)),
         Window::new("Simulated Display", &output_settings),
     )
 }
@@ -36,7 +39,7 @@ async fn text_app(mut display: CompressedDisplayPartition<BinaryColor, DisplayTy
     loop {
         Text::with_text_style(
             "hello \n world",
-            Point::new(30, 20),
+            Point::new(SCREEN_WIDTH as i32 / 4, SCREEN_HEIGHT as i32 / 3),
             character_style,
             text_style,
         )
@@ -45,19 +48,22 @@ async fn text_app(mut display: CompressedDisplayPartition<BinaryColor, DisplayTy
         .unwrap();
         Timer::after_millis(500).await;
         display.clear(BinaryColor::Off).await.unwrap();
-        Timer::after_millis(1000).await;
+        Timer::after_millis(500).await;
     }
 }
 
 async fn line_app(mut display: CompressedDisplayPartition<BinaryColor, DisplayType>) -> () {
     loop {
-        Line::new(Point::new(0, 0), Point::new(128, 128))
-            .draw_styled(
-                &PrimitiveStyle::with_stroke(BinaryColor::On, 1),
-                &mut display,
-            )
-            .await
-            .unwrap();
+        Line::new(
+            Point::new(0, 0),
+            Point::new(SCREEN_WIDTH as i32, SCREEN_WIDTH as i32),
+        )
+        .draw_styled(
+            &PrimitiveStyle::with_stroke(BinaryColor::On, 1),
+            &mut display,
+        )
+        .await
+        .unwrap();
         Timer::after_millis(500).await;
         Line::new(Point::new(0, 63), Point::new(63, 0))
             .draw_styled(
@@ -78,13 +84,19 @@ async fn main(spawner: Spawner) {
     let mut shared_display: SharedCompressedDisplay<DisplayType> =
         SharedCompressedDisplay::new(display, spawner);
 
-    let right_rect = Rectangle::new(Point::new(64, 0), Size::new(64, 64));
+    let right_rect = Rectangle::new(
+        Point::new(SCREEN_HEIGHT as i32, 0),
+        Size::new(SCREEN_HEIGHT as u32, SCREEN_HEIGHT as u32),
+    );
     shared_display
         .launch_new_app(line_app, right_rect)
         .await
         .unwrap();
 
-    let left_rect = Rectangle::new(Point::new(0, 0), Size::new(64, 64));
+    let left_rect = Rectangle::new(
+        Point::new(0, 0),
+        Size::new(SCREEN_HEIGHT as u32, SCREEN_HEIGHT as u32),
+    );
     shared_display
         .launch_new_app(text_app, left_rect)
         .await

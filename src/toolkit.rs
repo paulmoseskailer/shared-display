@@ -294,6 +294,11 @@ where
         F: AsyncFnMut(&mut D, Vec<D::BufferElement>) -> FlushResult,
     {
         'outer: loop {
+            if self.partition_areas.len() == 0 {
+                Timer::after(FLUSH_INTERVAL).await;
+                continue;
+            }
+
             let decompressed_buffer = self.decompress_all_buffers();
 
             let flush_result = FlushLock::new()
@@ -313,63 +318,99 @@ where
     }
 
     fn decompress_all_buffers(&self) -> Vec<B> {
-        let mut partition_buffers: Vec<Vec<D::BufferElement>> =
-            Vec::with_capacity(self.partition_areas.len());
         assert_eq!(self.partition_areas.len(), self.buffer_pointers.len());
 
+        let mut area_to_flush = self.partition_areas[0];
+        for area in self.partition_areas.iter().skip(1) {
+            area_to_flush = area_to_flush.envelope(&area);
+        }
+
+        let mut decompressed_buffer: Vec<B> =
+            vec![B::default(); (self.size.width * self.size.height) as usize];
+
         // decompress every partition's buffer
-        for i in 0..self.buffer_pointers.len() {
-            partition_buffers.push(self.decompress_ith_buffer(i));
+        for (i, &compressed_partition_ptr) in self.buffer_pointers.iter().enumerate() {
+            let compressed_partition: &Vec<(B, u8)> = unsafe { &*compressed_partition_ptr };
+            Self::decompress_into_buffer(
+                compressed_partition,
+                self.partition_areas[i],
+                &mut decompressed_buffer,
+                self.size,
+            );
         }
 
-        // combine partition buffers to one single buffer
-        // TODO: take different splitting into account, correctly piece together partitions
-        assert_eq!(partition_buffers.len(), 2);
-        assert_eq!(partition_buffers[0].len(), partition_buffers[1].len());
-        let mut entire_buffer: Vec<D::BufferElement> =
-            Vec::with_capacity(2 * partition_buffers[0].len());
-
-        // combine one row of each partition per row of entire_buffer
-        let screen_height = self.size.height as usize;
-        let screen_width = self.size.width as usize;
-
-        let partition_resolution = screen_width * screen_height / 2;
-        assert_eq!(partition_buffers[0].len(), partition_resolution);
-        assert_eq!(partition_buffers[1].len(), partition_resolution);
-
-        for row in 0..screen_height {
-            let start = row * (screen_width / 2);
-            let end = start + (screen_width / 2);
-            entire_buffer.extend_from_slice(&partition_buffers[0][start..end]);
-            entire_buffer.extend_from_slice(&partition_buffers[1][start..end]);
-        }
-
-        assert_eq!(entire_buffer.len(), screen_width * screen_height);
-        entire_buffer
+        decompressed_buffer
     }
 
-    fn decompress_ith_buffer(&self, i: usize) -> Vec<B> {
-        let ptr = self.buffer_pointers[i];
-        if ptr.is_null() {
-            panic!("found null ptr in SharedCompressedDisplay.buffer_pointers!");
-        }
-        // SAFETY: We assume these pointers are valid and point to `Vec<(D::BufferElement, u8)>`.
-        let rle_buffer: &Vec<(D::BufferElement, u8)> = unsafe { &*ptr };
+    fn decompress_into_buffer(
+        compressed_partition: &Vec<(B, u8)>,
+        partition_area: Rectangle,
+        decompressed_buffer: &mut Vec<B>,
+        total_size: Size,
+    ) {
+        let decompressed_len = compressed_partition
+            .iter()
+            .fold(0_u64, |before, (_color, run_len)| before + *run_len as u64);
+        let decompressed_area_resolution = partition_area.size.width * partition_area.size.height;
+        assert_eq!(decompressed_area_resolution as u64, decompressed_len);
 
-        let partition_area = self.partition_areas[i];
-        let partition_resolution =
-            (partition_area.size.width * partition_area.size.height) as usize;
-        let mut result = Vec::with_capacity(partition_resolution);
+        let mut pixels_copied: usize = 0;
+        let mut pixels_left_in_row: usize = partition_area.size.width as usize;
+        let partition_offset: usize = (partition_area.top_left.y as u32 * total_size.width
+            + partition_area.top_left.x as u32) as usize;
+        for (value, run_length) in compressed_partition {
+            let overlap = (*run_length as usize).saturating_sub(pixels_left_in_row);
+            if overlap == 0 {
+                // simple case, just copy into the buffer
+                let inside_partition_x_offset =
+                    partition_area.size.width as usize - pixels_left_in_row;
+                let inside_partition_y_offset = pixels_copied / partition_area.size.width as usize;
+                let decompressed_row_start =
+                    partition_offset + (inside_partition_y_offset * total_size.width as usize);
+                let decompressed_index = decompressed_row_start + inside_partition_x_offset;
+                decompressed_buffer
+                    [decompressed_index..(decompressed_index + *run_length as usize)]
+                    .fill(*value);
 
-        let mut decompressed_index: usize = 0;
-        for &(value, run_len) in rle_buffer {
-            // TODO: extend from slice instead of pushing every time
-            for _ in 0..run_len {
-                result.push(value);
+                pixels_left_in_row -= *run_length as usize;
+                // if we filled the entire row
+                if pixels_left_in_row == 0 {
+                    pixels_left_in_row = partition_area.size.width as usize;
+                }
+            } else {
+                // we have {overlap} pixels in the next row
+                // first, copy all except the overlapping pixels
+                let inside_partition_x_offset =
+                    partition_area.size.width as usize - pixels_left_in_row;
+                let inside_partition_y_offset = pixels_copied / partition_area.size.width as usize;
+                let decompressed_first_row_start =
+                    partition_offset + (inside_partition_y_offset * total_size.width as usize);
+                let decompressed_index = decompressed_first_row_start + inside_partition_x_offset;
+                decompressed_buffer[decompressed_index..(decompressed_index + pixels_left_in_row)]
+                    .fill(*value);
+
+                // then, check how many full rows are inside the overlap
+                let full_rows = overlap / partition_area.size.width as usize;
+                for row in 0..full_rows {
+                    let this_row_start =
+                        decompressed_first_row_start + (row + 1) * total_size.width as usize;
+                    decompressed_buffer
+                        [this_row_start..(this_row_start + partition_area.size.width as usize)]
+                        .fill(*value);
+                }
+
+                // lastly, copy the remaining overlap
+                let last_overlap = overlap - (full_rows * partition_area.size.width as usize);
+                if last_overlap > 0 {
+                    let last_row_start =
+                        decompressed_first_row_start + (full_rows + 1) * total_size.width as usize;
+                    decompressed_buffer[last_row_start..(last_row_start + last_overlap)]
+                        .fill(*value);
+                }
+
+                pixels_left_in_row = partition_area.size.width as usize - last_overlap;
             }
-            decompressed_index += run_len as usize;
+            pixels_copied += *run_length as usize;
         }
-        assert_eq!(decompressed_index, partition_resolution);
-        result
     }
 }
