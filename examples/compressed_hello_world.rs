@@ -54,9 +54,11 @@ async fn text_app(mut display: CompressedDisplayPartition<BinaryColor, DisplayTy
 
 async fn line_app(mut display: CompressedDisplayPartition<BinaryColor, DisplayType>) -> () {
     loop {
+        let bb = display.bounding_box();
+        // top left to bottom right
         Line::new(
             Point::new(0, 0),
-            Point::new(SCREEN_WIDTH as i32, SCREEN_WIDTH as i32),
+            Point::new(bb.size.width as i32, bb.size.height as i32),
         )
         .draw_styled(
             &PrimitiveStyle::with_stroke(BinaryColor::On, 1),
@@ -65,13 +67,20 @@ async fn line_app(mut display: CompressedDisplayPartition<BinaryColor, DisplayTy
         .await
         .unwrap();
         Timer::after_millis(500).await;
-        Line::new(Point::new(0, 63), Point::new(63, 0))
-            .draw_styled(
-                &PrimitiveStyle::with_stroke(BinaryColor::On, 1),
-                &mut display,
-            )
-            .await
-            .unwrap();
+
+        // bottom left to top right
+        Line::new(
+            Point::new(0, bb.size.height as i32),
+            Point::new(bb.size.width as i32, 0),
+        )
+        .draw_styled(
+            &PrimitiveStyle::with_stroke(BinaryColor::On, 1),
+            &mut display,
+        )
+        .await
+        .unwrap();
+
+        // clear and loop
         Timer::after_millis(500).await;
         display.clear(BinaryColor::Off).await.unwrap();
         Timer::after_millis(500).await;
@@ -84,12 +93,19 @@ async fn main(spawner: Spawner) {
     let mut shared_display: SharedCompressedDisplay<DisplayType> =
         SharedCompressedDisplay::new(display, spawner);
 
-    let right_rect = Rectangle::new(
-        Point::new(SCREEN_HEIGHT as i32, 0),
-        Size::new(SCREEN_HEIGHT as u32, SCREEN_HEIGHT as u32),
+    let quarter_size = Size::new((SCREEN_WIDTH / 2) as u32, (SCREEN_HEIGHT / 2) as u32);
+    let right_top = Rectangle::new(Point::new((SCREEN_WIDTH / 2) as i32, 0), quarter_size);
+    let right_bottom = Rectangle::new(
+        Point::new((SCREEN_WIDTH / 2) as i32, (SCREEN_HEIGHT / 2) as i32),
+        quarter_size,
     );
+
     shared_display
-        .launch_new_app(line_app, right_rect)
+        .launch_new_app(line_app, right_top)
+        .await
+        .unwrap();
+    shared_display
+        .launch_new_app(line_app, right_bottom)
         .await
         .unwrap();
 
