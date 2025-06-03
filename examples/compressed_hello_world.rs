@@ -17,7 +17,7 @@ use shared_display_core::compressed::CompressedDisplayPartition;
 type DisplayType = SimulatorDisplay<BinaryColor>;
 
 const SCREEN_WIDTH: usize = 128;
-const SCREEN_HEIGHT: usize = SCREEN_WIDTH / 2;
+const SCREEN_HEIGHT: usize = 96;
 
 fn init_simulator_display() -> (DisplayType, Window) {
     let output_settings = OutputSettingsBuilder::new()
@@ -111,7 +111,7 @@ async fn main(spawner: Spawner) {
 
     let left_rect = Rectangle::new(
         Point::new(0, 0),
-        Size::new(SCREEN_HEIGHT as u32, SCREEN_HEIGHT as u32),
+        Size::new(SCREEN_WIDTH as u32 / 2, SCREEN_HEIGHT as u32),
     );
     shared_display
         .launch_new_app(text_app, left_rect)

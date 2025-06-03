@@ -32,6 +32,10 @@ features = ["critical-section"]
 embedded-graphics = { git = "https://github.com/paulmoseskailer/embedded-graphics.git" }
 embedded-graphics-core = { git = "https://github.com/paulmoseskailer/embedded-graphics.git" }
 
+[features]
+default = []
+compressed = []
+
 [profile.release]
 debug = true
 lto = true

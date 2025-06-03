@@ -8,3 +8,9 @@ Then simply
 cargo run
 ```
 
+A version that uses framebuffer compression can be run with
+
+```bash
+cargo run --features compressed
+```
+

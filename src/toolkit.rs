@@ -22,10 +22,11 @@ use shared_display_core::{
 
 // TODO: allow user to choose chunk size
 const SCREEN_WIDTH: usize = 128;
-const CHUNK_SIZE: Size = Size::new(SCREEN_WIDTH as u32, SCREEN_WIDTH as u32 / 4); // assumed to have screen width
+const SCREEN_HEIGHT: usize = 96;
+const CHUNK_SIZE: Size = Size::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32 / 2); // assumed to have screen width
 const CHUNK_AREAS: [Rectangle; 2] = [
     const { Rectangle::new(Point::new(0, 0), CHUNK_SIZE) },
-    const { Rectangle::new(Point::new(0, SCREEN_WIDTH as i32 / 4), CHUNK_SIZE) },
+    const { Rectangle::new(Point::new(0, CHUNK_SIZE.height as i32), CHUNK_SIZE) },
 ];
 
 const FLUSH_INTERVAL: Duration = Duration::from_millis(20);
