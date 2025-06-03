@@ -89,7 +89,8 @@ async fn line_app(mut display: CompressedDisplayPartition<BinaryColor, DisplayTy
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (display, mut window) = init_simulator_display();
-    let mut shared_display: SharedCompressedDisplay<DisplayType> =
+    const CHUNK_HEIGHT: usize = SCREEN_HEIGHT / 2;
+    let mut shared_display: SharedCompressedDisplay<CHUNK_HEIGHT, DisplayType> =
         SharedCompressedDisplay::new(display, spawner);
 
     let quarter_size = Size::new((SCREEN_WIDTH / 2) as u32, (SCREEN_HEIGHT / 2) as u32);

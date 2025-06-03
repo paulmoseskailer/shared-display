@@ -26,7 +26,9 @@ use shared_display::{CompressedDisplayPartition, SharedCompressedDisplay};
 #[cfg(feature = "compressed")]
 type DisplayPartition<B, D> = CompressedDisplayPartition<B, D>;
 #[cfg(feature = "compressed")]
-type SharedDisplay<D> = SharedCompressedDisplay<D>;
+const CHUNK_HEIGHT: usize = SCREEN_HEIGHT / 4;
+#[cfg(feature = "compressed")]
+type SharedDisplay<D> = SharedCompressedDisplay<CHUNK_HEIGHT, D>;
 #[cfg(not(feature = "compressed"))]
 use shared_display::{DisplayPartition, toolkit::SharedDisplay};
 

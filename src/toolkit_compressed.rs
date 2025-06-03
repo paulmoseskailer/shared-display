@@ -17,16 +17,7 @@ use shared_display_core::{
     compressed::{CompressableDisplay, CompressedDisplayPartition},
 };
 
-// TODO: allow user to choose chunk size
-const SCREEN_WIDTH: usize = 128;
-const SCREEN_HEIGHT: usize = 96;
-const CHUNK_SIZE: Size = Size::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32 / 2); // assumed to have screen width
-const CHUNK_AREAS: [Rectangle; 2] = [
-    const { Rectangle::new(Point::new(0, 0), CHUNK_SIZE) },
-    const { Rectangle::new(Point::new(0, CHUNK_SIZE.height as i32), CHUNK_SIZE) },
-];
-
-pub struct SharedCompressedDisplay<D: CompressableDisplay> {
+pub struct SharedCompressedDisplay<const CHUNK_HEIGHT: usize, D: CompressableDisplay> {
     pub real_display: Mutex<CriticalSectionRawMutex, D>,
     size: Size,
     partition_areas: heapless::Vec<Rectangle, MAX_APPS_PER_SCREEN>,
@@ -35,25 +26,34 @@ pub struct SharedCompressedDisplay<D: CompressableDisplay> {
     spawner: &'static Spawner,
 }
 
-impl<D: CompressableDisplay> OriginDimensions for SharedCompressedDisplay<D> {
+impl<const CHUNK_HEIGHT: usize, D: CompressableDisplay> OriginDimensions
+    for SharedCompressedDisplay<CHUNK_HEIGHT, D>
+{
     fn size(&self) -> Size {
         self.size
     }
 }
 
-impl<D: CompressableDisplay> ContainsPoint for SharedCompressedDisplay<D> {
+impl<const CHUNK_HEIGHT: usize, D: CompressableDisplay> ContainsPoint
+    for SharedCompressedDisplay<CHUNK_HEIGHT, D>
+{
     fn contains(&self, point: Point) -> bool {
         self.bounding_box().contains(point)
     }
 }
 
-impl<B, D> SharedCompressedDisplay<D>
+impl<const CHUNK_HEIGHT: usize, B, D> SharedCompressedDisplay<CHUNK_HEIGHT, D>
 where
     D: CompressableDisplay<BufferElement = B>,
 {
     pub fn new(mut real_display: D, spawner: Spawner) -> Self {
         let spawner_ref: &'static Spawner = SPAWNER.init(spawner);
         let size = real_display.bounding_box().size;
+        assert_eq!(
+            size.height as usize % CHUNK_HEIGHT,
+            0,
+            "chosen CHUNK_HEIGHT needs to divide screen height"
+        );
         real_display.drop_buffer();
         SharedCompressedDisplay {
             real_display: Mutex::new(real_display),
@@ -120,8 +120,13 @@ where
                 continue;
             }
 
-            let chunk_areas = CHUNK_AREAS;
-            for chunk_area in chunk_areas {
+            let num_chunks = self.size.height as usize / CHUNK_HEIGHT;
+            for chunk in 0..num_chunks {
+                let chunk_area = Rectangle::new(
+                    Point::new(0, (chunk * CHUNK_HEIGHT) as i32),
+                    Size::new(self.size.width, CHUNK_HEIGHT as u32),
+                );
+
                 let decompressed_chunk: Vec<D::BufferElement> = FlushLock::new()
                     .protect_flush(async || self.decompress_chunk(chunk_area.clone()))
                     .await;
