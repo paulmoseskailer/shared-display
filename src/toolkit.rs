@@ -20,6 +20,14 @@ use shared_display_core::{
     compressed::{CompressableDisplay, CompressedDisplayPartition},
 };
 
+// TODO: allow user to choose chunk size
+const SCREEN_WIDTH: usize = 128;
+const CHUNK_SIZE: Size = Size::new(SCREEN_WIDTH as u32, SCREEN_WIDTH as u32 / 4); // assumed to have screen width
+const CHUNK_AREAS: [Rectangle; 2] = [
+    const { Rectangle::new(Point::new(0, 0), CHUNK_SIZE) },
+    const { Rectangle::new(Point::new(0, SCREEN_WIDTH as i32 / 4), CHUNK_SIZE) },
+];
+
 const FLUSH_INTERVAL: Duration = Duration::from_millis(20);
 const EVENT_QUEUE_SIZE: usize = MAX_APPS_PER_SCREEN;
 pub static EVENTS: Channel<CriticalSectionRawMutex, ResizeEvent, EVENT_QUEUE_SIZE> = Channel::new();
@@ -289,27 +297,37 @@ where
         Ok(())
     }
 
-    pub async fn flush_loop<F>(&self, mut flush_fn: F)
+    pub async fn flush_loop<F>(&self, mut flush_complete_fn: F)
     where
-        F: AsyncFnMut(&mut D, Vec<D::BufferElement>) -> FlushResult,
+        F: AsyncFnMut(&mut D) -> FlushResult,
     {
-        'outer: loop {
+        loop {
             if self.partition_areas.len() == 0 {
                 Timer::after(FLUSH_INTERVAL).await;
                 continue;
             }
 
-            let decompressed_buffer = self.decompress_all_buffers();
+            let chunk_areas = CHUNK_AREAS;
+            for chunk_area in chunk_areas {
+                let decompressed_chunk: Vec<D::BufferElement> = FlushLock::new()
+                    .protect_flush(async || self.decompress_chunk(chunk_area.clone()))
+                    .await;
+                self.real_display
+                    .lock()
+                    .await
+                    .flush_chunk(decompressed_chunk, chunk_area)
+                    .await;
+            }
 
             let flush_result = FlushLock::new()
                 .protect_flush(async || {
-                    flush_fn(&mut *self.real_display.lock().await, decompressed_buffer).await
+                    flush_complete_fn(&mut *self.real_display.lock().await).await
                 })
                 .await;
             match flush_result {
                 FlushResult::Continue => {}
                 FlushResult::Abort => {
-                    break 'outer;
+                    break;
                 }
             }
 
@@ -317,100 +335,124 @@ where
         }
     }
 
-    fn decompress_all_buffers(&self) -> Vec<B> {
-        assert_eq!(self.partition_areas.len(), self.buffer_pointers.len());
+    fn decompress_chunk(&self, chunk_area: Rectangle) -> Vec<D::BufferElement> {
+        let resolution = chunk_area.size.width * chunk_area.size.height;
+        assert_eq!(
+            chunk_area.top_left.x, 0,
+            "a chunk does not span the entire width of the screen"
+        );
+        assert_eq!(
+            chunk_area.size.width, self.size.width,
+            "a chunk does not span the entire width of the screen"
+        );
 
-        let mut area_to_flush = self.partition_areas[0];
-        for area in self.partition_areas.iter().skip(1) {
-            area_to_flush = area_to_flush.envelope(&area);
+        let mut decompressed_chunk: Vec<D::BufferElement> =
+            vec![D::BufferElement::default(); resolution as usize];
+        for (i, partition_area) in self.partition_areas.iter().enumerate() {
+            let intersection: Rectangle = partition_area.intersection(&chunk_area);
+            if intersection.size == Size::zero() {
+                continue;
+            }
+
+            // decompress intersection with partition
+            let compressed_partition: &Vec<(B, u8)> = unsafe { &*self.buffer_pointers[i] };
+            let decompressed_intersection =
+                Self::decompress_intersection(compressed_partition, *partition_area, intersection);
+
+            // copy decompressed intersection into chunk row by row
+            let y_offset_in_chunk = (intersection.top_left.y - chunk_area.top_left.y) as usize;
+            let x_offset_in_chunk = intersection.top_left.x as usize; //chunk starts at x=0
+            let start_index_in_chunk =
+                y_offset_in_chunk * chunk_area.size.width as usize + x_offset_in_chunk;
+            let pixels_to_copy_per_row = intersection.size.width as usize;
+
+            for row in 0..(intersection.size.height as usize) {
+                let row_start_index_chunk =
+                    start_index_in_chunk + (chunk_area.size.width as usize) * row;
+                let row_start_index_intersection = row * intersection.size.width as usize;
+                if row_start_index_chunk + pixels_to_copy_per_row > decompressed_chunk.len() {
+                    panic!("destination buffer index out of range");
+                }
+                if row_start_index_intersection + pixels_to_copy_per_row
+                    > decompressed_intersection.len()
+                {
+                    panic!("src buffer index out of range");
+                }
+                decompressed_chunk
+                    [row_start_index_chunk..(row_start_index_chunk + pixels_to_copy_per_row)]
+                    .copy_from_slice(
+                        &decompressed_intersection[row_start_index_intersection
+                            ..(row_start_index_intersection + pixels_to_copy_per_row)],
+                    );
+            }
         }
-
-        let mut decompressed_buffer: Vec<B> =
-            vec![B::default(); (self.size.width * self.size.height) as usize];
-
-        // decompress every partition's buffer
-        for (i, &compressed_partition_ptr) in self.buffer_pointers.iter().enumerate() {
-            let compressed_partition: &Vec<(B, u8)> = unsafe { &*compressed_partition_ptr };
-            Self::decompress_into_buffer(
-                compressed_partition,
-                self.partition_areas[i],
-                &mut decompressed_buffer,
-                self.size,
-            );
-        }
-
-        decompressed_buffer
+        decompressed_chunk
     }
 
-    fn decompress_into_buffer(
-        compressed_partition: &Vec<(B, u8)>,
-        partition_area: Rectangle,
-        decompressed_buffer: &mut Vec<B>,
-        total_size: Size,
-    ) {
-        let decompressed_len = compressed_partition
-            .iter()
-            .fold(0_u64, |before, (_color, run_len)| before + *run_len as u64);
-        let decompressed_area_resolution = partition_area.size.width * partition_area.size.height;
-        assert_eq!(decompressed_area_resolution as u64, decompressed_len);
+    fn decompress_intersection(
+        compressed_partition: &Vec<(D::BufferElement, u8)>,
+        compressed_partition_area: Rectangle,
+        intersection: Rectangle,
+    ) -> Vec<D::BufferElement> {
+        // we can assume that the intersection is as wide as the partition, since chunks are as
+        // wide as the screen
+        assert_eq!(
+            intersection.size.width, compressed_partition_area.size.width,
+            "CHUNK_SIZE needs to be as wide as the screen"
+        );
 
-        let mut pixels_copied: usize = 0;
-        let mut pixels_left_in_row: usize = partition_area.size.width as usize;
-        let partition_offset: usize = (partition_area.top_left.y as u32 * total_size.width
-            + partition_area.top_left.x as u32) as usize;
-        for (value, run_length) in compressed_partition {
-            let overlap = (*run_length as usize).saturating_sub(pixels_left_in_row);
-            if overlap == 0 {
-                // simple case, just copy into the buffer
-                let inside_partition_x_offset =
-                    partition_area.size.width as usize - pixels_left_in_row;
-                let inside_partition_y_offset = pixels_copied / partition_area.size.width as usize;
-                let decompressed_row_start =
-                    partition_offset + (inside_partition_y_offset * total_size.width as usize);
-                let decompressed_index = decompressed_row_start + inside_partition_x_offset;
-                decompressed_buffer
-                    [decompressed_index..(decompressed_index + *run_length as usize)]
-                    .fill(*value);
+        let intersection_top_left_relative_to_src =
+            intersection.top_left - compressed_partition_area.top_left;
+        let intersection_start_index_relative_to_src: usize =
+            (intersection_top_left_relative_to_src.y as u32 * compressed_partition_area.size.width
+                + intersection_top_left_relative_to_src.x as u32)
+                .try_into()
+                .unwrap();
 
-                pixels_left_in_row -= *run_length as usize;
-                // if we filled the entire row
-                if pixels_left_in_row == 0 {
-                    pixels_left_in_row = partition_area.size.width as usize;
-                }
-            } else {
-                // we have {overlap} pixels in the next row
-                // first, copy all except the overlapping pixels
-                let inside_partition_x_offset =
-                    partition_area.size.width as usize - pixels_left_in_row;
-                let inside_partition_y_offset = pixels_copied / partition_area.size.width as usize;
-                let decompressed_first_row_start =
-                    partition_offset + (inside_partition_y_offset * total_size.width as usize);
-                let decompressed_index = decompressed_first_row_start + inside_partition_x_offset;
-                decompressed_buffer[decompressed_index..(decompressed_index + pixels_left_in_row)]
-                    .fill(*value);
+        // find first run in RLE compressed buffer
+        let mut decompressed_index_in_src: usize = 0;
+        let mut run_iter = compressed_partition.iter();
+        let run = run_iter
+            .next()
+            .expect("RLE-compressed partition has no runs!");
+        let mut next_color = run.0;
+        let mut next_run_len: u8 = run.1;
 
-                // then, check how many full rows are inside the overlap
-                let full_rows = overlap / partition_area.size.width as usize;
-                for row in 0..full_rows {
-                    let this_row_start =
-                        decompressed_first_row_start + (row + 1) * total_size.width as usize;
-                    decompressed_buffer
-                        [this_row_start..(this_row_start + partition_area.size.width as usize)]
-                        .fill(*value);
-                }
-
-                // lastly, copy the remaining overlap
-                let last_overlap = overlap - (full_rows * partition_area.size.width as usize);
-                if last_overlap > 0 {
-                    let last_row_start =
-                        decompressed_first_row_start + (full_rows + 1) * total_size.width as usize;
-                    decompressed_buffer[last_row_start..(last_row_start + last_overlap)]
-                        .fill(*value);
-                }
-
-                pixels_left_in_row = partition_area.size.width as usize - last_overlap;
-            }
-            pixels_copied += *run_length as usize;
+        while (decompressed_index_in_src + next_run_len as usize)
+            < intersection_start_index_relative_to_src as usize
+        {
+            decompressed_index_in_src += next_run_len as usize;
+            let run = run_iter.next().expect(
+                "RLE-compressed partition ran out of runs before finding chunk intersection!",
+            );
+            (next_color, next_run_len) = *run;
         }
+
+        let total_pixels = intersection.size.width as usize * intersection.size.height as usize;
+        let mut result = Vec::with_capacity(total_pixels);
+
+        // copy run by run
+        // special case for first run
+        let first_run_overlap = (decompressed_index_in_src + next_run_len as usize)
+            - intersection_start_index_relative_to_src;
+        let pixels_to_copy = first_run_overlap.min(total_pixels);
+        result.extend(core::iter::repeat_n(next_color, pixels_to_copy));
+        let mut pixels_copied = pixels_to_copy;
+
+        // all other runs
+        while pixels_copied < total_pixels {
+            let run = run_iter.next().expect(
+                "RLE-compressed partition has no runs left, but hasn't copied the entire chunk intersection!",
+            );
+            (next_color, next_run_len) = *run;
+            let pixels_left = total_pixels.saturating_sub(pixels_copied);
+            let pixels_to_copy = (next_run_len as usize).min(pixels_left);
+            result.extend(core::iter::repeat_n(next_color, pixels_to_copy));
+            pixels_copied += pixels_to_copy as usize;
+        }
+
+        assert_eq!(pixels_copied, result.len());
+        assert_eq!(pixels_copied, total_pixels);
+        result
     }
 }

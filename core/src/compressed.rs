@@ -19,7 +19,10 @@ use crate::{DisplaySidePartitioningError, SharableBufferedDisplay, flush_lock::F
 pub trait CompressableDisplay:
     SharableBufferedDisplay<BufferElement: Copy + PartialEq + Default>
 {
-    // TODO: this drop does not seem necessary?
+    /// called for every chunk of the screen
+    async fn flush_chunk(&mut self, chunk: Vec<Self::BufferElement>, chunk_area: Rectangle);
+
+    // TODO: reduce buffer to chunk size instead
     fn drop_buffer(&mut self);
 }
 
