@@ -22,7 +22,7 @@ use embedded_graphics::{
 use gpio::{Level, Output};
 use shared_display::toolkit::FlushResult;
 #[cfg(feature = "compressed")]
-use shared_display::{CompressedDisplayPartition, toolkit::SharedCompressedDisplay};
+use shared_display::{CompressedDisplayPartition, SharedCompressedDisplay};
 #[cfg(feature = "compressed")]
 type DisplayPartition<B, D> = CompressedDisplayPartition<B, D>;
 #[cfg(feature = "compressed")]

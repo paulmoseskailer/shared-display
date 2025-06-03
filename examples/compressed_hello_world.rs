@@ -11,8 +11,7 @@ use embedded_graphics::{
 use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
-use shared_display::toolkit::{FlushResult, SharedCompressedDisplay};
-use shared_display_core::compressed::CompressedDisplayPartition;
+use shared_display::{CompressedDisplayPartition, FlushResult, SharedCompressedDisplay};
 
 type DisplayType = SimulatorDisplay<BinaryColor>;
 

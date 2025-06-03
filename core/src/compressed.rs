@@ -272,8 +272,7 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
 
 #[cfg(test)]
 mod tests {
-    use super::CompressedBuffer;
-    use embedded_graphics::prelude::*;
+    use super::*;
 
     #[test]
     fn test_clear() {
