@@ -687,18 +687,19 @@ dependencies = [
  "heapless",
  "shared-display-core",
  "static_cell",
- "tokio",
 ]
 
 [[package]]
 name = "shared-display-core"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "embassy-sync",
  "embassy-time",
  "embedded-graphics",
  "heapless",
  "portable-atomic",
+ "tokio",
 ]
 
 [[package]]
