@@ -99,7 +99,7 @@ async fn main(spawner: Spawner) {
         .unwrap();
 
     shared_display
-        .flush_loop(async |d, _area| {
+        .run_flush_loop_with(async |d, _area| {
             window.update(d);
             if window.events().any(|e| e == SimulatorEvent::Quit) {
                 return FlushResult::Abort;

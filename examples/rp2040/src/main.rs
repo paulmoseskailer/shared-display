@@ -20,10 +20,18 @@ use embedded_graphics::{
     text::{Alignment, Baseline, Text, TextStyleBuilder},
 };
 use gpio::{Level, Output};
-use shared_display::{
-    DisplayPartition,
-    toolkit::{FlushResult, SharedDisplay},
-};
+use shared_display::toolkit::FlushResult;
+#[cfg(feature = "compressed")]
+use shared_display::{CompressedDisplayPartition, SharedCompressedDisplay};
+#[cfg(feature = "compressed")]
+type DisplayPartition<B, D> = CompressedDisplayPartition<B, D>;
+#[cfg(feature = "compressed")]
+const CHUNK_HEIGHT: usize = SCREEN_HEIGHT / 4;
+#[cfg(feature = "compressed")]
+type SharedDisplay<D> = SharedCompressedDisplay<CHUNK_HEIGHT, D>;
+#[cfg(not(feature = "compressed"))]
+use shared_display::{DisplayPartition, toolkit::SharedDisplay};
+
 use ssd1351::{
     builder::Builder,
     mode::GraphicsMode,
@@ -105,8 +113,11 @@ async fn line_app(mut display: DisplayPartition<BufferElement, DisplayType<'_, '
 async fn main(spawner: Spawner) {
     defmt::info!("hello from defmt");
     {
-        use core::mem::MaybeUninit;
+        #[cfg(feature = "compressed")]
+        const HEAP_SIZE: usize = 4096 + BUF_SIZE;
+        #[cfg(not(feature = "compressed"))]
         const HEAP_SIZE: usize = 2048;
+        use core::mem::MaybeUninit;
         static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
         #[allow(static_mut_refs)]
         unsafe {
@@ -162,9 +173,15 @@ async fn main(spawner: Spawner) {
         .await
         .unwrap();
 
+    #[cfg(feature = "compressed")]
     shared_display
-        .flush_loop(async |display, _area| {
-            display.flush().await;
+        .run_flush_loop_with_completion(async |_display| FlushResult::Continue)
+        .await;
+
+    #[cfg(not(feature = "compressed"))]
+    shared_display
+        .run_flush_loop_with(async |display, area| {
+            display.flush_area(&area).await;
             FlushResult::Continue
         })
         .await;
