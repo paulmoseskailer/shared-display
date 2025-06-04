@@ -93,7 +93,7 @@ where
             .push(partition.get_ptr_to_buffer())
             .unwrap();
 
-        self.partition_areas.push(area.clone()).unwrap();
+        self.partition_areas.push(area).unwrap();
 
         Ok(partition)
     }
@@ -114,8 +114,7 @@ where
         let partition = self.new_partition(area).await?;
 
         let fut = app_fn(partition);
-        self.spawner
-            .must_spawn(launch_future(Box::pin(fut), area.clone()));
+        self.spawner.must_spawn(launch_future(Box::pin(fut), area));
 
         Ok(())
     }
@@ -133,7 +132,7 @@ where
         F: AsyncFnMut(&mut D) -> FlushResult,
     {
         loop {
-            if self.partition_areas.len() == 0 {
+            if self.partition_areas.is_empty() {
                 Timer::after(FLUSH_INTERVAL).await;
                 continue;
             }
@@ -146,7 +145,7 @@ where
                 );
 
                 let decompressed_chunk: Vec<D::BufferElement> = FlushLock::new()
-                    .protect_flush(async || self.decompress_chunk(chunk_area.clone()))
+                    .protect_flush(async || self.decompress_chunk(chunk_area))
                     .await;
                 self.real_display
                     .lock()
@@ -255,7 +254,7 @@ where
         let mut next_run_len: u8 = run.1;
 
         while (decompressed_index_in_src + next_run_len as usize)
-            < intersection_start_index_relative_to_src as usize
+            < intersection_start_index_relative_to_src
         {
             decompressed_index_in_src += next_run_len as usize;
             let run = run_iter.next().expect(
@@ -284,7 +283,7 @@ where
             let pixels_left = total_pixels.saturating_sub(pixels_copied);
             let pixels_to_copy = (next_run_len as usize).min(pixels_left);
             result.extend(core::iter::repeat_n(next_color, pixels_to_copy));
-            pixels_copied += pixels_to_copy as usize;
+            pixels_copied += pixels_to_copy;
         }
 
         assert_eq!(pixels_copied, result.len());

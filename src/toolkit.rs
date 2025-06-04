@@ -102,7 +102,7 @@ where
         let result = real_display.new_partition(area, &self.draw_trackers[index]);
 
         if result.is_ok() {
-            self.partition_areas.push(area.clone()).unwrap();
+            self.partition_areas.push(area).unwrap();
         }
 
         result.map_err(NewPartitionError::DisplaySide)
@@ -144,8 +144,7 @@ where
         let partition = self.new_partition(area).await?;
 
         let fut = app_fn(partition);
-        self.spawner
-            .must_spawn(launch_future(Box::pin(fut), area.clone()));
+        self.spawner.must_spawn(launch_future(Box::pin(fut), area));
 
         Ok(())
     }
@@ -167,8 +166,7 @@ where
         let partition = self.new_partition(area).await?;
 
         let fut = app_fn(partition, self.spawner);
-        self.spawner
-            .must_spawn(launch_future(Box::pin(fut), area.clone()));
+        self.spawner.must_spawn(launch_future(Box::pin(fut), area));
 
         Ok(())
     }
@@ -219,9 +217,9 @@ where
     F: AsyncFnMut(DisplayPartition<D>) -> (),
     for<'b> F::CallRefFuture<'b>: 'static,
 {
-    let area = partition.area.clone();
+    let area = partition.area;
     let fut = app_fn(partition);
     spawner.must_spawn(launch_future(Box::pin(fut), area));
 
-    return AppStart::Success;
+    AppStart::Success
 }
