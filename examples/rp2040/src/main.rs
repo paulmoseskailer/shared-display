@@ -20,9 +20,8 @@ use embedded_graphics::{
     text::{Alignment, Baseline, Text, TextStyleBuilder},
 };
 use gpio::{Level, Output};
-use shared_display::toolkit::FlushResult;
 #[cfg(feature = "compressed")]
-use shared_display::{CompressedDisplayPartition, SharedCompressedDisplay};
+use shared_display::{CompressedDisplayPartition, FlushResult, SharedCompressedDisplay};
 #[cfg(feature = "compressed")]
 type DisplayPartition<B, D> = CompressedDisplayPartition<B, D>;
 #[cfg(feature = "compressed")]
@@ -30,7 +29,7 @@ const CHUNK_HEIGHT: usize = SCREEN_HEIGHT / 4;
 #[cfg(feature = "compressed")]
 type SharedDisplay<D> = SharedCompressedDisplay<CHUNK_HEIGHT, D>;
 #[cfg(not(feature = "compressed"))]
-use shared_display::{DisplayPartition, toolkit::SharedDisplay};
+use shared_display::{DisplayPartition, FlushResult, SharedDisplay};
 
 use ssd1351::{
     builder::Builder,

@@ -13,8 +13,7 @@ use embedded_graphics::{
     primitives::Rectangle,
 };
 use shared_display_core::{
-    FlushLock, MAX_APPS_PER_SCREEN,
-    compressed::{CompressableDisplay, CompressedDisplayPartition},
+    CompressableDisplay, CompressedDisplayPartition, FlushLock, MAX_APPS_PER_SCREEN,
 };
 
 /// Shared Display with integrated RLE-compression.

@@ -9,8 +9,7 @@ use embedded_graphics::{
 use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
-use shared_display::toolkit::{FlushResult, SharedDisplay, launch_app_in_app};
-use shared_display_core::DisplayPartition;
+use shared_display::{DisplayPartition, FlushResult, SharedDisplay, launch_app_in_app};
 
 type DisplayType = SimulatorDisplay<BinaryColor>;
 

@@ -1,10 +1,10 @@
 #![no_std]
 #![allow(async_fn_in_trait)]
 
-pub mod compressed;
+mod compressed;
 pub use compressed::*;
 
-pub mod flush_lock;
+mod flush_lock;
 pub use flush_lock::*;
 
 use core::sync::atomic::{AtomicBool, Ordering};
