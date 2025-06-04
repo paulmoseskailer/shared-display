@@ -120,7 +120,7 @@ async fn main(spawner: Spawner) {
 
     Timer::after_millis(500).await;
     shared_display
-        .flush_loop(async |d| {
+        .run_flush_loop_with_completion(async |d| {
             window.update(d);
             if window.events().any(|e| e == SimulatorEvent::Quit) {
                 return FlushResult::Abort;

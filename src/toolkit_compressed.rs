@@ -17,7 +17,13 @@ use shared_display_core::{
     compressed::{CompressableDisplay, CompressedDisplayPartition},
 };
 
+/// Shared Display with integrated RLE-compression.
+///
+/// Every partition holds its own RLE-buffer and implements [`DrawTarget`]. When flushing, the
+/// screen is devided into chunks with CHUNK_HEIGHT, decompressing chunks one-by-one, see
+/// [`SharedCompressedDisplay::run_flush_loop_with_completion`].
 pub struct SharedCompressedDisplay<const CHUNK_HEIGHT: usize, D: CompressableDisplay> {
+    /// The actual display, protected by a mutex.
     pub real_display: Mutex<CriticalSectionRawMutex, D>,
     size: Size,
     partition_areas: heapless::Vec<Rectangle, MAX_APPS_PER_SCREEN>,
@@ -46,6 +52,7 @@ impl<const CHUNK_HEIGHT: usize, B, D> SharedCompressedDisplay<CHUNK_HEIGHT, D>
 where
     D: CompressableDisplay<BufferElement = B>,
 {
+    /// Creates a new Shared Compressed Display from a real display.
     pub fn new(mut real_display: D, spawner: Spawner) -> Self {
         let spawner_ref: &'static Spawner = SPAWNER.init(spawner);
         let size = real_display.bounding_box().size;
@@ -92,6 +99,10 @@ where
         Ok(partition)
     }
 
+    /// Launches a new app in an area of the screen.
+    ///
+    /// Returns an error if the area is not available, overlaps with existing apps or the screen
+    /// border.
     pub async fn launch_new_app<F>(
         &mut self,
         mut app_fn: F,
@@ -110,7 +121,15 @@ where
         Ok(())
     }
 
-    pub async fn flush_loop<F>(&self, mut flush_complete_fn: F)
+    /// Runs the flush loop, additionally calling the passed in function at the end of every flush.
+    ///
+    /// Note that the flushing is already done internally, chunk-by-chunk, calling
+    /// [`CompressableDisplay::flush_chunk`] for every decompressed chunk. The passed in function can be used to
+    /// complete a flush, for example if [`CompressableDisplay::flush_chunk`] draws to a buffer
+    /// that has to be drawn to the actual screen. It is called once per flush, after all chunks have been
+    /// decompressed.
+    /// Only exits if the flush function returns [`FlushResult::Abort`].
+    pub async fn run_flush_loop_with_completion<F>(&self, mut flush_complete_fn: F)
     where
         F: AsyncFnMut(&mut D) -> FlushResult,
     {
