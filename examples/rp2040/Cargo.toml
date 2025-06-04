@@ -20,7 +20,7 @@ defmt = "0.3"
 defmt-rtt = "0.4"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 
-ssd1351 = { path = "../../../ssd1351/" }
+ssd1351 = { git = "https://github.com/paulmoseskailer/ssd1351", branch = "async_draw_partial_flush" }
 
 shared-display = { path = "../.." }
 
