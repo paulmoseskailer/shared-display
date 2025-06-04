@@ -1275,6 +1275,7 @@ dependencies = [
 [[package]]
 name = "shared-display-core"
 version = "0.1.0"
+source = "git+https://github.com/paulmoseskailer/shared-display.git#d0c92142e911c6cce882ee2c72feb4faa4aaccfc"
 dependencies = [
  "embassy-sync",
  "embassy-time",
