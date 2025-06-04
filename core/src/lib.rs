@@ -1,3 +1,14 @@
+//! shared-display-core contains the core components of [shared-display] that are required to add
+//! screen-sharing support for a display driver.
+//!
+//! This crate should only be used by drivers that extend shared-display. Applications should instead depend on [shared-display] itself.
+//!
+//! This crate heavily relies on and builds on top of [embedded-graphics](https://crates.io/crates/embedded-graphics)
+//! and various crates of the [embassy project](embassy.dev).
+//!
+//!
+//!
+//!
 #![no_std]
 #![allow(async_fn_in_trait)]
 
@@ -18,26 +29,35 @@ use embedded_graphics::{
     primitives::Rectangle,
 };
 
+/// Maximum number of apps allowed on the screen concurrently.
 pub const MAX_APPS_PER_SCREEN: usize = 8;
+
+/// Error type for creating a partition.
 #[derive(Debug)]
 pub enum DisplaySidePartitioningError {
-    // cannot create partitions less than 8 pixels wide
+    /// Cannot create partitions less than 8 pixels wide.
     PartitionTooSmall,
-    // display width must be divisible by both pixels as well as buffer elements
-    BufferPixelMismatch,
-    // a partition should have width divisible by 8
+    /// A partition should have width divisible by 8.
     PartitionBadWidth,
+    /// Display width must be divisible by both pixels as well as buffer elements.
+    BufferPixelMismatch,
 }
 
+/// A buffered [`DrawTarget`] that can be shared among multiple apps.
 pub trait SharableBufferedDisplay: DrawTarget {
+    /// The type of elements saved to the buffer - may differ from [`DrawTarget::Color`].
     type BufferElement;
 
-    fn get_buffer(&mut self) -> &mut [Self::BufferElement];
-
-    fn calculate_buffer_index(point: Point, buffer_area_size: Size) -> usize;
-
+    /// Specify how `Color` maps to  `BufferElement`.
     fn map_to_buffer_element(color: Self::Color) -> Self::BufferElement;
 
+    /// Provide mutable access to the buffer.
+    fn get_buffer(&mut self) -> &mut [Self::BufferElement];
+
+    /// Calculate the buffer position of a [`Point`].
+    fn calculate_buffer_index(point: Point, buffer_area_size: Size) -> usize;
+
+    /// Return a new [`DisplayPartition`] of the display.
     fn new_partition(
         &mut self,
         area: Rectangle,
@@ -67,14 +87,18 @@ pub trait SharableBufferedDisplay: DrawTarget {
     }
 }
 
+/// A partition of a [`SharableBufferedDisplay`].
 pub struct DisplayPartition<D: SharableBufferedDisplay + ?Sized> {
+    /// Mutable access to the entire display's buffer.
     pub buffer: *mut D::BufferElement,
     buffer_len: usize,
 
+    /// Size of the parent display.
     pub parent_size: Size,
+    /// Size of the partition itself.
     pub area: Rectangle,
-    _display: core::marker::PhantomData<D>,
 
+    _display: core::marker::PhantomData<D>,
     draw_tracker: &'static DrawTracker,
 }
 
@@ -92,6 +116,7 @@ where
     C: PixelColor,
     D: SharableBufferedDisplay<BufferElement = B, Color = C> + ?Sized,
 {
+    /// Creates a new partition.
     pub fn new(
         buffer: &mut [B],
         parent_size: Size,
@@ -108,6 +133,7 @@ where
         }
     }
 
+    /// Splits the partition vertically into two new partitions.
     pub fn split_vertically(
         &mut self,
     ) -> Result<(DisplayPartition<D>, DisplayPartition<D>), DisplaySidePartitioningError> {
@@ -153,7 +179,9 @@ where
         ))
     }
 
+    /// Increase this partition's size.
     pub fn envelope(&mut self, other: &Rectangle) {
+        // TODO: do size checks and possibly return `DisplaySidePartitioningError`
         self.area = self.area.envelope(other);
     }
 
@@ -237,14 +265,19 @@ where
     }
 }
 
+/// Area of the screen that has been drawn to since the last flush.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AreaToFlush {
+    /// The entire screen.
     All,
+    /// Part of the screen.
     Some(Rectangle),
+    /// Nothing.
     None,
 }
 
 impl AreaToFlush {
+    /// Increase the area's size.
     pub fn include(&mut self, other: &Rectangle) {
         match self {
             AreaToFlush::All => {}
@@ -256,12 +289,16 @@ impl AreaToFlush {
     }
 }
 
+/// An object to track the [`AreaToFlush`] in a concurrent context. Provides safe methods to read
+/// and write concurrently.
 pub struct DrawTracker {
     is_dirty: AtomicBool,
+    /// The area that has been drawn to, protected by a mutex.
     pub dirty_area: Mutex<CriticalSectionRawMutex, AreaToFlush>,
 }
 
 impl DrawTracker {
+    /// Creates a new draw tracker.
     pub const fn new() -> Self {
         Self {
             is_dirty: AtomicBool::new(false),
@@ -269,6 +306,7 @@ impl DrawTracker {
         }
     }
 
+    /// Returns the area that has been drawn to safely.
     pub async fn take_dirty_area(&self) -> AreaToFlush {
         if self.is_dirty.load(Ordering::Acquire) {
             let mut guard = self.dirty_area.lock().await;

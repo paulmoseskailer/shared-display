@@ -16,22 +16,28 @@ use alloc::vec::Vec;
 
 use crate::{DisplaySidePartitioningError, SharableBufferedDisplay, flush_lock::FlushLock};
 
+/// A [`SharableBufferedDisplay`] that can compressed.
 pub trait CompressableDisplay:
     SharableBufferedDisplay<BufferElement: Copy + PartialEq + Default>
 {
-    /// called for every chunk of the screen
+    /// Flushes a given chunk. Called once per chunk for every flush.
     async fn flush_chunk(&mut self, chunk: Vec<Self::BufferElement>, chunk_area: Rectangle);
 
+    /// Drops the original buffer if one exists. [`CompressedDisplayPartition`]s assign their
+    /// own buffers.
     // TODO: reduce buffer to chunk size instead
     fn drop_buffer(&mut self);
 }
 
+/// A partition of a [`CompressableDisplay`].
 pub struct CompressedDisplayPartition<D: SharableBufferedDisplay + ?Sized>
 where
     D::BufferElement: core::cmp::PartialEq + Copy,
 {
     buffer: CompressedBuffer<D::BufferElement>,
+    /// Size of the parent display.
     pub parent_size: Size,
+    /// Size of the partition itself.
     pub area: Rectangle,
 
     _display: core::marker::PhantomData<D>,
@@ -63,6 +69,7 @@ where
     B: Copy + core::cmp::PartialEq,
     D: CompressableDisplay<BufferElement = B, Color = C> + ?Sized,
 {
+    /// Creates a new partition.
     pub fn new(
         parent_size: Size,
         area: Rectangle,
@@ -82,11 +89,13 @@ where
         })
     }
 
+    /// Increase this partition's size.
     pub fn envelope(&mut self, other: &Rectangle) {
         self.area = self.area.envelope(other);
         todo!("enveloping compressed partitions not yet implemented");
     }
 
+    /// Provide a raw pointer to the compressed buffer.
     pub fn get_ptr_to_buffer(&self) -> *const Vec<(B, u8)> {
         self.buffer.get_ptr_to_inner()
     }
@@ -131,12 +140,14 @@ where
     }
 }
 
+/// An RLE-encoded framebuffer.
 struct CompressedBuffer<B: Copy + PartialEq> {
     inner: Box<Vec<(B, u8)>>,
     decompressed_size: Size,
 }
 
 impl<B: Copy + PartialEq> CompressedBuffer<B> {
+    /// Creates a new compressed buffer with a start value.
     pub fn new(decompressed_size: Size, start_value: B) -> Self {
         let num_pixels = decompressed_size.width * decompressed_size.height;
         let full_runs = num_pixels / 255;
@@ -151,10 +162,12 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
         }
     }
 
+    /// Returns a raw pointer to the inner buffer.
     pub fn get_ptr_to_inner(&self) -> *const Vec<(B, u8)> {
         &*self.inner
     }
 
+    /// Check whether the buffer still encodes as many elements as it should.
     pub fn check_integrity(&self) -> Result<(), ()> {
         let decompressed_buffer_len = self.decompressed_size.width * self.decompressed_size.height;
         let actual_len = self
@@ -257,6 +270,7 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
         }
     }
 
+    /// Empty the buffer and refill it with a new value.
     pub fn clear_and_refill(&mut self, new_value: B) {
         // empty first
         self.inner.clear();

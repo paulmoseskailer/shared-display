@@ -9,9 +9,12 @@ const MAX_WRITERS: u8 = COUNTER_BITS;
 
 const RETRY_DELAY: Duration = Duration::from_millis(20);
 
+/// A lock to avoid writes to the buffer during decompression for flushing, but allow multiple
+/// writes at the same time.
 pub struct FlushLock {}
 
 impl FlushLock {
+    /// Creates a new lock.
     pub fn new() -> Self {
         FlushLock {}
     }
@@ -43,6 +46,7 @@ impl FlushLock {
         );
     }
 
+    /// Ensures no writes are in progress before flushing.
     pub async fn protect_flush<F, R>(&self, f: F) -> R
     where
         F: AsyncFnOnce() -> R,
@@ -94,6 +98,7 @@ impl FlushLock {
         assert_ne!(before & COUNTER_BITS, 0, "after write, write counter was 0");
     }
 
+    /// Ensures no flush is in progress before writing.
     pub async fn protect_write<F, R>(&self, f: F) -> R
     where
         F: FnOnce() -> R,
