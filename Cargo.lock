@@ -697,7 +697,6 @@ dependencies = [
  "embassy-sync",
  "embassy-time",
  "embedded-graphics",
- "heapless",
  "portable-atomic",
  "tokio",
 ]
