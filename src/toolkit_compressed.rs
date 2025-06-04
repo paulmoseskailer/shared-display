@@ -73,7 +73,7 @@ where
     async fn new_partition(
         &mut self,
         area: Rectangle,
-    ) -> Result<CompressedDisplayPartition<B, D>, NewPartitionError> {
+    ) -> Result<CompressedDisplayPartition<D>, NewPartitionError> {
         // check area inside display
         if !(self.contains(area.top_left)
             && self.contains(area.bottom_right().unwrap_or(area.top_left)))
@@ -108,7 +108,7 @@ where
         area: Rectangle,
     ) -> Result<(), NewPartitionError>
     where
-        F: AsyncFnMut(CompressedDisplayPartition<B, D>) -> (),
+        F: AsyncFnMut(CompressedDisplayPartition<D>) -> (),
         for<'b> F::CallRefFuture<'b>: 'static,
     {
         let partition = self.new_partition(area).await?;

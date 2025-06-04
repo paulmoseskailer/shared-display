@@ -25,7 +25,7 @@ fn init_simulator_display() -> (DisplayType, Window) {
     )
 }
 
-async fn text_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> () {
+async fn text_app(mut display: DisplayPartition<DisplayType>) -> () {
     let character_style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
     let text_style = TextStyleBuilder::new()
         .baseline(Baseline::Middle)
@@ -53,7 +53,7 @@ async fn text_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> ()
     }
 }
 
-async fn line_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> () {
+async fn line_app(mut display: DisplayPartition<DisplayType>) -> () {
     loop {
         let max_x: i32 = (display.area.size.width - 1).try_into().unwrap();
         let max_y: i32 = (display.area.size.height - 1).try_into().unwrap();

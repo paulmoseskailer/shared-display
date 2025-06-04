@@ -42,7 +42,7 @@ pub trait SharableBufferedDisplay: DrawTarget {
         &mut self,
         area: Rectangle,
         draw_tracker: &'static DrawTracker,
-    ) -> Result<DisplayPartition<Self::BufferElement, Self>, DisplaySidePartitioningError> {
+    ) -> Result<DisplayPartition<Self>, DisplaySidePartitioningError> {
         if area.size.width < 8 {
             return Err(DisplaySidePartitioningError::PartitionTooSmall);
         }
@@ -67,8 +67,8 @@ pub trait SharableBufferedDisplay: DrawTarget {
     }
 }
 
-pub struct DisplayPartition<B, D: ?Sized> {
-    pub buffer: *mut B,
+pub struct DisplayPartition<D: SharableBufferedDisplay + ?Sized> {
+    pub buffer: *mut D::BufferElement,
     buffer_len: usize,
 
     pub parent_size: Size,
@@ -78,16 +78,16 @@ pub struct DisplayPartition<B, D: ?Sized> {
     draw_tracker: &'static DrawTracker,
 }
 
-impl<B, D> ContainsPoint for DisplayPartition<B, D>
+impl<D> ContainsPoint for DisplayPartition<D>
 where
-    D: ?Sized,
+    D: SharableBufferedDisplay + ?Sized,
 {
     fn contains(&self, p: Point) -> bool {
         self.area.contains(p)
     }
 }
 
-impl<C, B, D> DisplayPartition<B, D>
+impl<C, B, D> DisplayPartition<D>
 where
     C: PixelColor,
     D: SharableBufferedDisplay<BufferElement = B, Color = C> + ?Sized,
@@ -97,7 +97,7 @@ where
         parent_size: Size,
         area: Rectangle,
         draw_tracker: &'static DrawTracker,
-    ) -> DisplayPartition<B, D> {
+    ) -> DisplayPartition<D> {
         DisplayPartition {
             buffer: buffer.as_mut_ptr(),
             parent_size,
@@ -110,8 +110,7 @@ where
 
     pub fn split_vertically(
         &mut self,
-    ) -> Result<(DisplayPartition<B, D>, DisplayPartition<B, D>), DisplaySidePartitioningError>
-    {
+    ) -> Result<(DisplayPartition<D>, DisplayPartition<D>), DisplaySidePartitioningError> {
         let size = self.area.size;
 
         // ensure no bytes are split in half by rounding to a split of width multiple of 8
@@ -191,16 +190,16 @@ where
     }
 }
 
-impl<B, D> Dimensions for DisplayPartition<B, D>
+impl<D> Dimensions for DisplayPartition<D>
 where
-    D: SharableBufferedDisplay<BufferElement = B>,
+    D: SharableBufferedDisplay + ?Sized,
 {
     fn bounding_box(&self) -> Rectangle {
         self.area
     }
 }
 
-impl<B, D> DrawTarget for DisplayPartition<B, D>
+impl<B, D> DrawTarget for DisplayPartition<D>
 where
     D: SharableBufferedDisplay<BufferElement = B>,
 {

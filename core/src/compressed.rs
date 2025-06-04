@@ -26,15 +26,18 @@ pub trait CompressableDisplay:
     fn drop_buffer(&mut self);
 }
 
-pub struct CompressedDisplayPartition<B: core::cmp::PartialEq + Copy, D: ?Sized> {
-    buffer: CompressedBuffer<B>,
+pub struct CompressedDisplayPartition<D: SharableBufferedDisplay + ?Sized>
+where
+    D::BufferElement: core::cmp::PartialEq + Copy,
+{
+    buffer: CompressedBuffer<D::BufferElement>,
     pub parent_size: Size,
     pub area: Rectangle,
 
     _display: core::marker::PhantomData<D>,
 }
 
-impl<C, B, D> ContainsPoint for CompressedDisplayPartition<B, D>
+impl<C, B, D> ContainsPoint for CompressedDisplayPartition<D>
 where
     B: Copy + core::cmp::PartialEq,
     D: CompressableDisplay<BufferElement = B, Color = C> + ?Sized,
@@ -44,7 +47,7 @@ where
     }
 }
 
-impl<C, B, D> Dimensions for CompressedDisplayPartition<B, D>
+impl<C, B, D> Dimensions for CompressedDisplayPartition<D>
 where
     B: Copy + core::cmp::PartialEq,
     D: CompressableDisplay<BufferElement = B, Color = C> + ?Sized,
@@ -54,7 +57,7 @@ where
     }
 }
 
-impl<C, B, D> CompressedDisplayPartition<B, D>
+impl<C, B, D> CompressedDisplayPartition<D>
 where
     C: PixelColor,
     B: Copy + core::cmp::PartialEq,
@@ -63,7 +66,7 @@ where
     pub fn new(
         parent_size: Size,
         area: Rectangle,
-    ) -> Result<CompressedDisplayPartition<B, D>, DisplaySidePartitioningError> {
+    ) -> Result<CompressedDisplayPartition<D>, DisplaySidePartitioningError> {
         if area.size.width < 8 {
             return Err(DisplaySidePartitioningError::PartitionTooSmall);
         }
@@ -89,7 +92,7 @@ where
     }
 }
 
-impl<B, D> DrawTarget for CompressedDisplayPartition<B, D>
+impl<B, D> DrawTarget for CompressedDisplayPartition<D>
 where
     B: Copy + core::cmp::PartialEq,
     D: CompressableDisplay<BufferElement = B>,

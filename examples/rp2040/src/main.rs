@@ -23,7 +23,7 @@ use gpio::{Level, Output};
 #[cfg(feature = "compressed")]
 use shared_display::{CompressedDisplayPartition, FlushResult, SharedCompressedDisplay};
 #[cfg(feature = "compressed")]
-type DisplayPartition<B, D> = CompressedDisplayPartition<B, D>;
+type DisplayPartition<D> = CompressedDisplayPartition<D>;
 #[cfg(feature = "compressed")]
 const CHUNK_HEIGHT: usize = SCREEN_HEIGHT / 4;
 #[cfg(feature = "compressed")]
@@ -60,9 +60,8 @@ type DisplayType<'a, 'b, 'c> = GraphicsMode<
         Output<'c>,
     >,
 >;
-type BufferElement = u16;
 
-pub async fn text_app(mut display: DisplayPartition<BufferElement, DisplayType<'_, '_, '_>>) {
+pub async fn text_app(mut display: DisplayPartition<DisplayType<'_, '_, '_>>) {
     let character_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
     let text_style = TextStyleBuilder::new()
         .baseline(Baseline::Middle)
@@ -85,7 +84,7 @@ pub async fn text_app(mut display: DisplayPartition<BufferElement, DisplayType<'
     }
 }
 
-async fn line_app(mut display: DisplayPartition<BufferElement, DisplayType<'_, '_, '_>>) -> () {
+async fn line_app(mut display: DisplayPartition<DisplayType<'_, '_, '_>>) -> () {
     loop {
         Line::new(
             Point::new(0, 0),

@@ -25,7 +25,7 @@ fn init_simulator_display() -> (DisplayType, Window) {
 
 async fn recursive_split_app(
     recursion_level: u8,
-    mut display: DisplayPartition<BinaryColor, DisplayType>,
+    mut display: DisplayPartition<DisplayType>,
     spawner: &'static Spawner,
 ) -> () {
     let max_x: i32 = (display.bounding_box().size.width - 1).try_into().unwrap();
