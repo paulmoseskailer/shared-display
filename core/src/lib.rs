@@ -140,7 +140,7 @@ where
         let size = self.area.size;
 
         // ensure no bytes are split in half by rounding to a split of width multiple of 8
-        let left_area_width = (size.width / 2) + 7 & !7;
+        let left_area_width = ((size.width / 2) + 7) & !7;
         let left_area = Rectangle::new(self.area.top_left, Size::new(left_area_width, size.height));
         let right_area = Rectangle::new(
             self.area.top_left + Point::new(left_area_width.try_into().unwrap(), 0),
@@ -281,7 +281,7 @@ impl AreaToFlush {
     pub fn include(&mut self, other: &Rectangle) {
         match self {
             AreaToFlush::All => {}
-            AreaToFlush::None => *self = AreaToFlush::Some(other.clone()),
+            AreaToFlush::None => *self = AreaToFlush::Some(*other),
             AreaToFlush::Some(rect) => {
                 *self = AreaToFlush::Some(rect.envelope(other));
             }
@@ -295,6 +295,12 @@ pub struct DrawTracker {
     is_dirty: AtomicBool,
     /// The area that has been drawn to, protected by a mutex.
     pub dirty_area: Mutex<CriticalSectionRawMutex, AreaToFlush>,
+}
+
+impl Default for DrawTracker {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DrawTracker {

@@ -141,6 +141,7 @@ where
 }
 
 /// An RLE-encoded framebuffer.
+#[allow(clippy::box_collection)]
 struct CompressedBuffer<B: Copy + PartialEq> {
     inner: Box<Vec<(B, u8)>>,
     decompressed_size: Size,
@@ -177,14 +178,13 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
         if actual_len == decompressed_buffer_len as u64 {
             return Ok(());
         }
-        return Err(());
+        Err(())
     }
 
     fn set_at_index(&mut self, target_index: usize, new_value: B) {
         let mut current_index = 0;
         let mut run_index = 0;
-        let mut iter = self.inner.iter();
-        while let Some((_color, run_length)) = iter.next() {
+        for (_color, run_length) in self.inner.iter() {
             if current_index + *run_length as usize > target_index {
                 break;
             }

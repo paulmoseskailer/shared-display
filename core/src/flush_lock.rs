@@ -13,6 +13,12 @@ const RETRY_DELAY: Duration = Duration::from_millis(20);
 /// writes at the same time.
 pub struct FlushLock {}
 
+impl Default for FlushLock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FlushLock {
     /// Creates a new lock.
     pub fn new() -> Self {
