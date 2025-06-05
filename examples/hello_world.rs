@@ -88,7 +88,6 @@ async fn line_app(mut display: DisplayPartition<DisplayType>) -> () {
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (display, mut window) = init_simulator_display();
-    const CHUNK_HEIGHT: usize = SCREEN_HEIGHT / 2;
     let mut shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display, spawner);
 
     let quarter_size = Size::new((SCREEN_WIDTH / 2) as u32, (SCREEN_HEIGHT / 2) as u32);
