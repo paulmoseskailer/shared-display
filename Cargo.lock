@@ -262,7 +262,7 @@ dependencies = [
  "maybe-async",
  "ouroboros",
  "sdl2",
- "shared-display-core",
+ "shared-display-core 0.1.0 (git+https://github.com/paulmoseskailer/shared-display.git)",
 ]
 
 [[package]]
@@ -686,7 +686,7 @@ dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
  "heapless",
- "shared-display-core",
+ "shared-display-core 0.1.0 (git+https://github.com/paulmoseskailer/shared-display.git)",
  "static_cell",
 ]
 
@@ -700,6 +700,17 @@ dependencies = [
  "embedded-graphics",
  "portable-atomic",
  "tokio",
+]
+
+[[package]]
+name = "shared-display-core"
+version = "0.1.0"
+source = "git+https://github.com/paulmoseskailer/shared-display.git#8c076ad6e2d86191049f791fb0c10f0dbb71dd4c"
+dependencies = [
+ "embassy-sync",
+ "embassy-time",
+ "embedded-graphics",
+ "portable-atomic",
 ]
 
 [[package]]
