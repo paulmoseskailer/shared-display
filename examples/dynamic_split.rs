@@ -9,8 +9,7 @@ use embedded_graphics::{
 use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
-use shared_display::toolkit::{FlushResult, SharedDisplay, launch_app_in_app};
-use shared_display_core::DisplayPartition;
+use shared_display::{DisplayPartition, FlushResult, SharedDisplay, launch_app_in_app};
 
 type DisplayType = SimulatorDisplay<BinaryColor>;
 
@@ -26,7 +25,7 @@ fn init_simulator_display() -> (DisplayType, Window) {
 
 async fn recursive_split_app(
     recursion_level: u8,
-    mut display: DisplayPartition<BinaryColor, DisplayType>,
+    mut display: DisplayPartition<DisplayType>,
     spawner: &'static Spawner,
 ) -> () {
     let max_x: i32 = (display.bounding_box().size.width - 1).try_into().unwrap();

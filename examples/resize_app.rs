@@ -11,8 +11,7 @@ use embedded_graphics::{
 use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
-use shared_display::toolkit::{self, FlushResult, SharedDisplay};
-use shared_display_core::DisplayPartition;
+use shared_display::{DisplayPartition, FlushResult, ResizeEvent, SharedDisplay};
 
 type DisplayType = SimulatorDisplay<BinaryColor>;
 
@@ -26,7 +25,7 @@ fn init_simulator_display() -> (DisplayType, Window) {
     )
 }
 
-async fn text_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> () {
+async fn text_app(mut display: DisplayPartition<DisplayType>) -> () {
     let character_style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
     let text_style = TextStyleBuilder::new()
         .baseline(Baseline::Middle)
@@ -54,7 +53,7 @@ async fn text_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> ()
     }
 }
 
-async fn line_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> () {
+async fn line_app(mut display: DisplayPartition<DisplayType>) -> () {
     loop {
         let max_x: i32 = (display.area.size.width - 1).try_into().unwrap();
         let max_y: i32 = (display.area.size.height - 1).try_into().unwrap();
@@ -77,10 +76,10 @@ async fn line_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> ()
         display.clear(BinaryColor::Off).await.unwrap();
         Timer::after_millis(200).await;
 
-        match toolkit::EVENTS.try_receive() {
+        match shared_display::EVENTS.try_receive() {
             Err(_) => continue,
             Ok(event) => match event {
-                toolkit::ResizeEvent::AppClosed(area) => display.envelope(&area),
+                ResizeEvent::AppClosed(area) => display.envelope(&area),
             },
         };
     }

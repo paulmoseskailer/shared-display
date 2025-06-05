@@ -28,7 +28,7 @@ fn init_simulator_display() -> (DisplayType, Window) {
     )
 }
 
-async fn text_app(mut display: CompressedDisplayPartition<BinaryColor, DisplayType>) -> () {
+async fn text_app(mut display: CompressedDisplayPartition<DisplayType>) -> () {
     let character_style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
     let text_style = TextStyleBuilder::new()
         .baseline(Baseline::Middle)
@@ -51,7 +51,7 @@ async fn text_app(mut display: CompressedDisplayPartition<BinaryColor, DisplayTy
     }
 }
 
-async fn line_app(mut display: CompressedDisplayPartition<BinaryColor, DisplayType>) -> () {
+async fn line_app(mut display: CompressedDisplayPartition<DisplayType>) -> () {
     loop {
         let bb = display.bounding_box();
         // top left to bottom right

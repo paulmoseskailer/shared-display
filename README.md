@@ -41,4 +41,4 @@ Then, [`SharedCompressedDisplay`](./src/toolkit_compressed.rs#L24) is a drop-in 
 
 ## Some Notes on Design Decisions
 
-- `core` is a sub-crate because the toolkit uses nightly Rust and drivers need to implement the `SharableBufferedDisplay` Trait. They should be able to do so without switching to nightly.
+- `core` is a sub-crate because the toolkit uses nightly Rust and drivers need to implement the `SharableBufferedDisplay` Trait. They need to be able to do so without switching to nightly.

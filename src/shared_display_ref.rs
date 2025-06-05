@@ -18,6 +18,7 @@ pub struct SharedDisplayReference<D: DrawTarget + OriginDimensions + 'static> {
 impl<C: PixelColor, E, D: DrawTarget<Color = C, Error = E> + OriginDimensions + 'static>
     SharedDisplayReference<D>
 {
+    #[allow(dead_code)]
     pub fn from_rectangle(
         display: &'static Mutex<CriticalSectionRawMutex, Option<D>>,
 
@@ -59,6 +60,7 @@ impl<C: PixelColor, E, D: DrawTarget<Color = C, Error = E> + OriginDimensions> D
     }
 }
 
+#[allow(dead_code)]
 pub async fn split_vertically<D>(
     display: &'static Mutex<CriticalSectionRawMutex, Option<D>>,
 ) -> (SharedDisplayReference<D>, SharedDisplayReference<D>)

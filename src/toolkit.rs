@@ -80,7 +80,7 @@ where
     async fn new_partition(
         &mut self,
         area: Rectangle,
-    ) -> Result<DisplayPartition<B, D>, NewPartitionError> {
+    ) -> Result<DisplayPartition<D>, NewPartitionError> {
         let real_display: &mut D = &mut *self.real_display.lock().await;
 
         // check area inside display
@@ -102,7 +102,7 @@ where
         let result = real_display.new_partition(area, &self.draw_trackers[index]);
 
         if result.is_ok() {
-            self.partition_areas.push(area.clone()).unwrap();
+            self.partition_areas.push(area).unwrap();
         }
 
         result.map_err(NewPartitionError::DisplaySide)
@@ -110,7 +110,7 @@ where
 
     pub async fn partition_vertically(
         &mut self,
-    ) -> Result<(DisplayPartition<B, D>, DisplayPartition<B, D>), NewPartitionError> {
+    ) -> Result<(DisplayPartition<D>, DisplayPartition<D>), NewPartitionError> {
         let total_area = self.real_display.lock().await.bounding_box();
         let half_size = Size::new(total_area.size.width / 2, total_area.size.height);
         let left_area = Rectangle::new(total_area.top_left, half_size);
@@ -138,14 +138,13 @@ where
         area: Rectangle,
     ) -> Result<(), NewPartitionError>
     where
-        F: AsyncFnMut(DisplayPartition<B, D>) -> (),
+        F: AsyncFnMut(DisplayPartition<D>) -> (),
         for<'b> F::CallRefFuture<'b>: 'static,
     {
         let partition = self.new_partition(area).await?;
 
         let fut = app_fn(partition);
-        self.spawner
-            .must_spawn(launch_future(Box::pin(fut), area.clone()));
+        self.spawner.must_spawn(launch_future(Box::pin(fut), area));
 
         Ok(())
     }
@@ -161,14 +160,13 @@ where
         area: Rectangle,
     ) -> Result<(), NewPartitionError>
     where
-        F: AsyncFnMut(DisplayPartition<B, D>, &'static Spawner) -> (),
+        F: AsyncFnMut(DisplayPartition<D>, &'static Spawner) -> (),
         for<'b> F::CallRefFuture<'b>: 'static,
     {
         let partition = self.new_partition(area).await?;
 
         let fut = app_fn(partition, self.spawner);
-        self.spawner
-            .must_spawn(launch_future(Box::pin(fut), area.clone()));
+        self.spawner.must_spawn(launch_future(Box::pin(fut), area));
 
         Ok(())
     }
@@ -209,18 +207,19 @@ pub(crate) async fn launch_future(app_future: Pin<Box<dyn Future<Output = ()>>>,
 }
 
 /// Launches an app from inside another app.
-pub async fn launch_app_in_app<F, B, D>(
+pub async fn launch_app_in_app<F, D>(
     spawner: &'static Spawner,
     mut app_fn: F,
-    partition: DisplayPartition<B, D>,
+    partition: DisplayPartition<D>,
 ) -> AppStart
 where
-    F: AsyncFnMut(DisplayPartition<B, D>) -> (),
+    D: SharableBufferedDisplay,
+    F: AsyncFnMut(DisplayPartition<D>) -> (),
     for<'b> F::CallRefFuture<'b>: 'static,
 {
-    let area = partition.area.clone();
+    let area = partition.area;
     let fut = app_fn(partition);
     spawner.must_spawn(launch_future(Box::pin(fut), area));
 
-    return AppStart::Success;
+    AppStart::Success
 }

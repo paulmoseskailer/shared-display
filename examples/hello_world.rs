@@ -11,8 +11,7 @@ use embedded_graphics::{
 use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
-use shared_display::toolkit::{FlushResult, SharedDisplay};
-use shared_display_core::DisplayPartition;
+use shared_display::{DisplayPartition, FlushResult, SharedDisplay};
 
 type DisplayType = SimulatorDisplay<BinaryColor>;
 
@@ -26,7 +25,7 @@ fn init_simulator_display() -> (DisplayType, Window) {
     )
 }
 
-async fn text_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> () {
+async fn text_app(mut display: DisplayPartition<DisplayType>) -> () {
     let character_style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
     let text_style = TextStyleBuilder::new()
         .baseline(Baseline::Middle)
@@ -49,7 +48,7 @@ async fn text_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> ()
     }
 }
 
-async fn line_app(mut display: DisplayPartition<BinaryColor, DisplayType>) -> () {
+async fn line_app(mut display: DisplayPartition<DisplayType>) -> () {
     loop {
         Line::new(Point::new(0, 0), Point::new(128, 128))
             .draw_styled(
