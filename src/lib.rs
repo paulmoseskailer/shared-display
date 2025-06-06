@@ -125,6 +125,7 @@
 //!
 #![no_std]
 #![feature(async_fn_traits)]
+#![feature(iter_advance_by)]
 
 mod shared_display_ref;
 mod toolkit;

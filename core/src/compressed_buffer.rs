@@ -154,6 +154,69 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
     }
 }
 
+#[derive(Clone)]
+pub struct DecompressingIter<'a, B: Copy + PartialEq + Default> {
+    current_run: Option<(B, u8)>,
+    compressed_buffer_iter: core::slice::Iter<'a, (B, u8)>,
+    decompressed_index: usize,
+}
+
+impl<'a, B: Copy + PartialEq + Default> DecompressingIter<'a, B> {
+    pub fn new(buffer: &'a Vec<(B, u8)>) -> Self {
+        let mut compressed_buffer_iter = buffer.iter();
+        let current_run = compressed_buffer_iter.next().map(|&r| r);
+        Self {
+            current_run,
+            compressed_buffer_iter,
+            decompressed_index: 0,
+        }
+    }
+}
+
+impl<'a, B: Copy + PartialEq + Default> Iterator for DecompressingIter<'a, B> {
+    type Item = B;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (current_value, items_left_in_run) = self.current_run?;
+        if items_left_in_run > 1 {
+            self.current_run?.1 -= 1;
+        } else {
+            // consuming last element of current_run
+            let &(next_value, next_run_len) = self.compressed_buffer_iter.next()?;
+            assert_ne!(next_run_len, 0, "run with length 0 found");
+
+            self.current_run = Some((next_value, next_run_len));
+        }
+        self.decompressed_index += 1;
+        Some(current_value)
+    }
+
+    fn nth(&mut self, n: usize) -> Option<B> {
+        if n == 0 {
+            self.next();
+        }
+
+        let (_current_value, items_left_in_run) = self.current_run?;
+        if n < (items_left_in_run as usize) {
+            // nth item is in current run
+            self.current_run?.1 -= <usize as TryInto<u8>>::try_into(n).unwrap();
+            self.decompressed_index += n;
+
+            self.next()
+        } else {
+            // not enough items in current run, skip to next run
+            let remaining_n = n - items_left_in_run as usize;
+            self.decompressed_index += items_left_in_run as usize;
+
+            let &(next_value, next_run_len) = self.compressed_buffer_iter.next()?;
+            assert_ne!(next_run_len, 0, "run with length 0 found");
+            self.current_run = Some((next_value, next_run_len));
+
+            self.nth(remaining_n)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
