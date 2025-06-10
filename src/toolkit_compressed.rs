@@ -224,9 +224,6 @@ where
                 {
                     *dst = src;
                 }
-                partition_iter
-                    .advance_by(intersection.size.width as usize)
-                    .unwrap();
             }
         }
         decompressed_chunk

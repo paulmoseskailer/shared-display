@@ -9,6 +9,7 @@ use alloc::vec::Vec;
 
 /// An RLE-encoded framebuffer.
 #[allow(clippy::box_collection)]
+#[derive(Clone)]
 pub struct CompressedBuffer<B: Copy + PartialEq> {
     pub(crate) inner: Box<Vec<(B, u8)>>,
     decompressed_size: Size,
@@ -37,6 +38,9 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
 
     /// Check whether the buffer still encodes as many elements as it should.
     pub fn check_integrity(&self) -> Result<(), ()> {
+        self.inner.iter().for_each(|&(_color, run_len)| {
+            assert_ne!(run_len, 0, "found run with length 0");
+        });
         let decompressed_buffer_len = self.decompressed_size.width * self.decompressed_size.height;
         let actual_len = self
             .inner
@@ -179,13 +183,10 @@ impl<'a, B: Copy + PartialEq + Default> Iterator for DecompressingIter<'a, B> {
     fn next(&mut self) -> Option<Self::Item> {
         let (current_value, items_left_in_run) = self.current_run?;
         if items_left_in_run > 1 {
-            self.current_run?.1 -= 1;
+            self.current_run = Some((current_value, items_left_in_run - 1));
         } else {
             // consuming last element of current_run
-            let &(next_value, next_run_len) = self.compressed_buffer_iter.next()?;
-            assert_ne!(next_run_len, 0, "run with length 0 found");
-
-            self.current_run = Some((next_value, next_run_len));
+            self.current_run = self.compressed_buffer_iter.next().map(|&r| r);
         }
         self.decompressed_index += 1;
         Some(current_value)
@@ -193,13 +194,14 @@ impl<'a, B: Copy + PartialEq + Default> Iterator for DecompressingIter<'a, B> {
 
     fn nth(&mut self, n: usize) -> Option<B> {
         if n == 0 {
-            self.next();
+            return self.next();
         }
 
-        let (_current_value, items_left_in_run) = self.current_run?;
+        let (current_value, items_left_in_run) = self.current_run?;
         if n < (items_left_in_run as usize) {
             // nth item is in current run
-            self.current_run?.1 -= <usize as TryInto<u8>>::try_into(n).unwrap();
+            let n_u8 = <usize as TryInto<u8>>::try_into(n).unwrap();
+            self.current_run = Some((current_value, items_left_in_run - n_u8));
             self.decompressed_index += n;
 
             self.next()
@@ -222,7 +224,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_clear() {
+    fn test_buffer_clear() {
         let size = Size::new(128, 4); // 512 pixels total
         let mut buffer = CompressedBuffer::<u8>::new(size, 45);
         buffer.check_integrity().unwrap();
@@ -291,5 +293,43 @@ mod tests {
         assert_eq!(buffer.inner, Box::new(vec![(0, 254), (3, 1), (0, 2)]));
         buffer.set_at_index(254, 0);
         assert_eq!(buffer.inner, Box::new(vec![(0, 255), (0, 2)]));
+    }
+
+    #[test]
+    fn test_iter() {
+        let width = 64;
+        let height = 32;
+        let size = Size::new(width, height);
+        let mut buffer = CompressedBuffer::<u8>::new(size, 0);
+        buffer.check_integrity().unwrap();
+
+        let index1: usize = (height / 2 * width + width / 2) as usize;
+        let index2: usize = (width * height - 1) as usize;
+        buffer.set_at_index(0, 1);
+        buffer.set_at_index(index1, 1);
+        buffer.set_at_index(index2, 1);
+
+        buffer.check_integrity().unwrap();
+        let mut iter = DecompressingIter::new(unsafe { &*buffer.get_ptr_to_inner() });
+
+        // check cloned iter
+        assert_eq!(iter.clone().nth(0), Some(1));
+        assert_eq!(iter.clone().nth(1), Some(0));
+
+        assert_eq!(iter.clone().nth(index1 - 1), Some(0));
+        assert_eq!(iter.clone().nth(index1), Some(1));
+        assert_eq!(iter.clone().nth(index1 + 1), Some(0));
+
+        assert_eq!(iter.clone().nth(index2), Some(1));
+
+        // advance actual iter
+        iter.advance_by(index1 - 1).unwrap();
+        assert_eq!(iter.next(), Some(0));
+        assert_eq!(iter.next(), Some(1));
+        assert_eq!(iter.next(), Some(0));
+
+        iter.advance_by(index2 - (index1 + 2)).unwrap();
+        assert_eq!(iter.next(), Some(1));
+        assert_eq!(iter.next(), None);
     }
 }
