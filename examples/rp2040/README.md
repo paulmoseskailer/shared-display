@@ -14,3 +14,10 @@ A version that uses framebuffer compression can be run with
 cargo run --features compressed
 ```
 
+# How to Measure memory usage
+
+```bash
+cargo run [--features compressed] | tee log.txt
+python plot_usage.py
+```
+
