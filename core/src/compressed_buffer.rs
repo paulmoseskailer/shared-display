@@ -1,12 +1,5 @@
 use core::cmp::PartialEq;
-use embedded_graphics::{
-    Pixel,
-    draw_target::DrawTarget,
-    geometry::Point,
-    prelude::*,
-    prelude::{Dimensions, PixelColor, Size},
-    primitives::Rectangle,
-};
+use embedded_graphics::prelude::*;
 
 // requires embedded-alloc for no_std
 extern crate alloc;
@@ -14,136 +7,11 @@ use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::{DisplaySidePartitioningError, SharableBufferedDisplay, flush_lock::FlushLock};
-
-/// A [`SharableBufferedDisplay`] that can compressed.
-pub trait CompressableDisplay:
-    SharableBufferedDisplay<BufferElement: Copy + PartialEq + Default>
-{
-    /// Flushes a given chunk. Called once per chunk for every flush.
-    async fn flush_chunk(&mut self, chunk: Vec<Self::BufferElement>, chunk_area: Rectangle);
-
-    /// Drops the original buffer if one exists. [`CompressedDisplayPartition`]s assign their
-    /// own buffers.
-    // TODO: reduce buffer to chunk size instead
-    fn drop_buffer(&mut self);
-}
-
-/// A partition of a [`CompressableDisplay`].
-pub struct CompressedDisplayPartition<D: SharableBufferedDisplay + ?Sized>
-where
-    D::BufferElement: core::cmp::PartialEq + Copy,
-{
-    buffer: CompressedBuffer<D::BufferElement>,
-    /// Size of the parent display.
-    pub parent_size: Size,
-    /// Size of the partition itself.
-    pub area: Rectangle,
-
-    _display: core::marker::PhantomData<D>,
-}
-
-impl<C, B, D> ContainsPoint for CompressedDisplayPartition<D>
-where
-    B: Copy + core::cmp::PartialEq,
-    D: CompressableDisplay<BufferElement = B, Color = C> + ?Sized,
-{
-    fn contains(&self, p: Point) -> bool {
-        self.area.contains(p)
-    }
-}
-
-impl<C, B, D> Dimensions for CompressedDisplayPartition<D>
-where
-    B: Copy + core::cmp::PartialEq,
-    D: CompressableDisplay<BufferElement = B, Color = C> + ?Sized,
-{
-    fn bounding_box(&self) -> Rectangle {
-        self.area
-    }
-}
-
-impl<C, B, D> CompressedDisplayPartition<D>
-where
-    C: PixelColor,
-    B: Copy + core::cmp::PartialEq,
-    D: CompressableDisplay<BufferElement = B, Color = C> + ?Sized,
-{
-    /// Creates a new partition.
-    pub fn new(
-        parent_size: Size,
-        area: Rectangle,
-    ) -> Result<CompressedDisplayPartition<D>, DisplaySidePartitioningError> {
-        if area.size.width < 8 {
-            return Err(DisplaySidePartitioningError::PartitionTooSmall);
-        }
-        if area.size.width % 8 != 0 {
-            return Err(DisplaySidePartitioningError::PartitionBadWidth);
-        }
-
-        Ok(CompressedDisplayPartition {
-            buffer: CompressedBuffer::new(area.size, B::default()),
-            parent_size,
-            area,
-            _display: core::marker::PhantomData,
-        })
-    }
-
-    /// Increase this partition's size.
-    pub fn envelope(&mut self, other: &Rectangle) {
-        self.area = self.area.envelope(other);
-        todo!("enveloping compressed partitions not yet implemented");
-    }
-
-    /// Provide a raw pointer to the compressed buffer.
-    pub fn get_ptr_to_buffer(&self) -> *const Vec<(B, u8)> {
-        self.buffer.get_ptr_to_inner()
-    }
-}
-
-impl<B, D> DrawTarget for CompressedDisplayPartition<D>
-where
-    B: Copy + core::cmp::PartialEq,
-    D: CompressableDisplay<BufferElement = B>,
-{
-    type Color = D::Color;
-    type Error = D::Error;
-    async fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Pixel<Self::Color>>,
-    {
-        FlushLock::new()
-            .protect_write(|| {
-                let self_area = self.area;
-                let self_offset = self_area.top_left;
-                pixels
-                    .into_iter()
-                    .filter(|Pixel(pos, _color)| self_area.contains(*pos + self_offset))
-                    .for_each(|p| {
-                        let target_index = D::calculate_buffer_index(p.0, self.area.size);
-                        self.buffer
-                            .set_at_index(target_index, D::map_to_buffer_element(p.1));
-                    });
-                if self.buffer.check_integrity().is_err() {
-                    panic!("after draw_iter check rle failed");
-                }
-            })
-            .await;
-        Ok(())
-    }
-
-    // TODO: implement fill_contiguous, fill_solid efficiently
-    async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        self.buffer
-            .clear_and_refill(D::map_to_buffer_element(color));
-        Ok(())
-    }
-}
-
 /// An RLE-encoded framebuffer.
 #[allow(clippy::box_collection)]
-struct CompressedBuffer<B: Copy + PartialEq> {
-    inner: Box<Vec<(B, u8)>>,
+#[derive(Clone)]
+pub struct CompressedBuffer<B: Copy + PartialEq> {
+    pub(crate) inner: Box<Vec<(B, u8)>>,
     decompressed_size: Size,
 }
 
@@ -170,6 +38,9 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
 
     /// Check whether the buffer still encodes as many elements as it should.
     pub fn check_integrity(&self) -> Result<(), ()> {
+        self.inner.iter().for_each(|&(_color, run_len)| {
+            assert_ne!(run_len, 0, "found run with length 0");
+        });
         let decompressed_buffer_len = self.decompressed_size.width * self.decompressed_size.height;
         let actual_len = self
             .inner
@@ -181,7 +52,7 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
         Err(())
     }
 
-    fn set_at_index(&mut self, target_index: usize, new_value: B) {
+    pub(crate) fn set_at_index(&mut self, target_index: usize, new_value: B) {
         let mut current_index = 0;
         let mut run_index = 0;
         for (_color, run_length) in self.inner.iter() {
@@ -287,12 +158,73 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
     }
 }
 
+#[derive(Clone)]
+pub struct DecompressingIter<'a, B: Copy + PartialEq + Default> {
+    current_run: Option<(B, u8)>,
+    compressed_buffer_iter: core::slice::Iter<'a, (B, u8)>,
+    decompressed_index: usize,
+}
+
+impl<'a, B: Copy + PartialEq + Default> DecompressingIter<'a, B> {
+    pub fn new(buffer: &'a Vec<(B, u8)>) -> Self {
+        let mut compressed_buffer_iter = buffer.iter();
+        let current_run = compressed_buffer_iter.next().map(|&r| r);
+        Self {
+            current_run,
+            compressed_buffer_iter,
+            decompressed_index: 0,
+        }
+    }
+}
+
+impl<'a, B: Copy + PartialEq + Default> Iterator for DecompressingIter<'a, B> {
+    type Item = B;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (current_value, items_left_in_run) = self.current_run?;
+        if items_left_in_run > 1 {
+            self.current_run = Some((current_value, items_left_in_run - 1));
+        } else {
+            // consuming last element of current_run
+            self.current_run = self.compressed_buffer_iter.next().map(|&r| r);
+        }
+        self.decompressed_index += 1;
+        Some(current_value)
+    }
+
+    fn nth(&mut self, n: usize) -> Option<B> {
+        if n == 0 {
+            return self.next();
+        }
+
+        let (current_value, items_left_in_run) = self.current_run?;
+        if n < (items_left_in_run as usize) {
+            // nth item is in current run
+            let n_u8 = <usize as TryInto<u8>>::try_into(n).unwrap();
+            self.current_run = Some((current_value, items_left_in_run - n_u8));
+            self.decompressed_index += n;
+
+            self.next()
+        } else {
+            // not enough items in current run, skip to next run
+            let remaining_n = n - items_left_in_run as usize;
+            self.decompressed_index += items_left_in_run as usize;
+
+            let &(next_value, next_run_len) = self.compressed_buffer_iter.next()?;
+            assert_ne!(next_run_len, 0, "run with length 0 found");
+            self.current_run = Some((next_value, next_run_len));
+
+            self.nth(remaining_n)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_clear() {
+    fn test_buffer_clear() {
         let size = Size::new(128, 4); // 512 pixels total
         let mut buffer = CompressedBuffer::<u8>::new(size, 45);
         buffer.check_integrity().unwrap();
@@ -361,5 +293,43 @@ mod tests {
         assert_eq!(buffer.inner, Box::new(vec![(0, 254), (3, 1), (0, 2)]));
         buffer.set_at_index(254, 0);
         assert_eq!(buffer.inner, Box::new(vec![(0, 255), (0, 2)]));
+    }
+
+    #[test]
+    fn test_iter() {
+        let width = 64;
+        let height = 32;
+        let size = Size::new(width, height);
+        let mut buffer = CompressedBuffer::<u8>::new(size, 0);
+        buffer.check_integrity().unwrap();
+
+        let index1: usize = (height / 2 * width + width / 2) as usize;
+        let index2: usize = (width * height - 1) as usize;
+        buffer.set_at_index(0, 1);
+        buffer.set_at_index(index1, 1);
+        buffer.set_at_index(index2, 1);
+
+        buffer.check_integrity().unwrap();
+        let mut iter = DecompressingIter::new(unsafe { &*buffer.get_ptr_to_inner() });
+
+        // check cloned iter
+        assert_eq!(iter.clone().nth(0), Some(1));
+        assert_eq!(iter.clone().nth(1), Some(0));
+
+        assert_eq!(iter.clone().nth(index1 - 1), Some(0));
+        assert_eq!(iter.clone().nth(index1), Some(1));
+        assert_eq!(iter.clone().nth(index1 + 1), Some(0));
+
+        assert_eq!(iter.clone().nth(index2), Some(1));
+
+        // advance actual iter
+        iter.advance_by(index1 - 1).unwrap();
+        assert_eq!(iter.next(), Some(0));
+        assert_eq!(iter.next(), Some(1));
+        assert_eq!(iter.next(), Some(0));
+
+        iter.advance_by(index2 - (index1 + 2)).unwrap();
+        assert_eq!(iter.next(), Some(1));
+        assert_eq!(iter.next(), None);
     }
 }

@@ -1,1 +1,5 @@
 target/
+
+# results
+log*
+*.png

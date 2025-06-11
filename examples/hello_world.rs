@@ -14,13 +14,15 @@ use embedded_graphics_simulator::{
 use shared_display::{DisplayPartition, FlushResult, SharedDisplay};
 
 type DisplayType = SimulatorDisplay<BinaryColor>;
+const SCREEN_WIDTH: usize = 128;
+const SCREEN_HEIGHT: usize = 96;
 
 fn init_simulator_display() -> (DisplayType, Window) {
     let output_settings = OutputSettingsBuilder::new()
         .theme(BinaryColorTheme::OledWhite)
         .build();
     (
-        SimulatorDisplay::new(Size::new(128, 64)),
+        SimulatorDisplay::new(Size::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)),
         Window::new("Simulated Display", &output_settings),
     )
 }
@@ -35,7 +37,7 @@ async fn text_app(mut display: DisplayPartition<DisplayType>) -> () {
     loop {
         Text::with_text_style(
             "hello \n world",
-            Point::new(30, 20),
+            Point::new(SCREEN_WIDTH as i32 / 4, SCREEN_HEIGHT as i32 / 3),
             character_style,
             text_style,
         )
@@ -50,21 +52,33 @@ async fn text_app(mut display: DisplayPartition<DisplayType>) -> () {
 
 async fn line_app(mut display: DisplayPartition<DisplayType>) -> () {
     loop {
-        Line::new(Point::new(0, 0), Point::new(128, 128))
-            .draw_styled(
-                &PrimitiveStyle::with_stroke(BinaryColor::On, 1),
-                &mut display,
-            )
-            .await
-            .unwrap();
+        let bb = display.bounding_box();
+        // top left to bottom right
+        Line::new(
+            Point::new(0, 0),
+            Point::new(bb.size.width as i32, bb.size.height as i32),
+        )
+        .draw_styled(
+            &PrimitiveStyle::with_stroke(BinaryColor::On, 1),
+            &mut display,
+        )
+        .await
+        .unwrap();
         Timer::after_millis(500).await;
-        Line::new(Point::new(0, 63), Point::new(63, 0))
-            .draw_styled(
-                &PrimitiveStyle::with_stroke(BinaryColor::On, 1),
-                &mut display,
-            )
-            .await
-            .unwrap();
+
+        // bottom left to top right
+        Line::new(
+            Point::new(0, bb.size.height as i32),
+            Point::new(bb.size.width as i32, 0),
+        )
+        .draw_styled(
+            &PrimitiveStyle::with_stroke(BinaryColor::On, 1),
+            &mut display,
+        )
+        .await
+        .unwrap();
+
+        // clear and loop
         Timer::after_millis(500).await;
         display.clear(BinaryColor::Off).await.unwrap();
         Timer::after_millis(500).await;
@@ -76,17 +90,32 @@ async fn main(spawner: Spawner) {
     let (display, mut window) = init_simulator_display();
     let mut shared_display: SharedDisplay<DisplayType> = SharedDisplay::new(display, spawner);
 
-    let right_rect = Rectangle::new(Point::new(64, 0), Size::new(64, 64));
+    let quarter_size = Size::new((SCREEN_WIDTH / 2) as u32, (SCREEN_HEIGHT / 2) as u32);
+    let right_top = Rectangle::new(Point::new((SCREEN_WIDTH / 2) as i32, 0), quarter_size);
+    let right_bottom = Rectangle::new(
+        Point::new((SCREEN_WIDTH / 2) as i32, (SCREEN_HEIGHT / 2) as i32),
+        quarter_size,
+    );
+
     shared_display
-        .launch_new_app(line_app, right_rect)
+        .launch_new_app(line_app, right_top)
+        .await
+        .unwrap();
+    shared_display
+        .launch_new_app(line_app, right_bottom)
         .await
         .unwrap();
 
-    let left_rect = Rectangle::new(Point::new(0, 0), Size::new(64, 64));
+    let left_rect = Rectangle::new(
+        Point::new(0, 0),
+        Size::new(SCREEN_WIDTH as u32 / 2, SCREEN_HEIGHT as u32),
+    );
     shared_display
         .launch_new_app(text_app, left_rect)
         .await
         .unwrap();
+
+    Timer::after_millis(500).await;
 
     shared_display
         .run_flush_loop_with(async |d, _area| {

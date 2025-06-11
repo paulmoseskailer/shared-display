@@ -10,7 +10,7 @@ use embassy_rp::{
     spi::{Async, Spi},
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-use embassy_time::{Delay, Timer};
+use embassy_time::{Delay, Duration, Timer};
 use embedded_graphics::{
     geometry::Size,
     mono_font::{MonoTextStyle, ascii::FONT_10X20},
@@ -48,8 +48,18 @@ static HEAP: Heap = Heap::empty();
 
 const SCREEN_WIDTH: usize = 128;
 const SCREEN_HEIGHT: usize = 96;
+
+const MEM_USAGE_TRACK_INTERVAL: Duration = Duration::from_millis(200);
+
 const BUF_SIZE: usize = SCREEN_WIDTH * SCREEN_HEIGHT * 2;
 static mut BUF: [u8; BUF_SIZE] = [0; BUF_SIZE];
+
+#[cfg(feature = "compressed")]
+const COMPRESSION_GAINS: usize = 8_000;
+#[cfg(feature = "compressed")]
+const HEAP_SIZE: usize = 2048 + BUF_SIZE - COMPRESSION_GAINS;
+#[cfg(not(feature = "compressed"))]
+const HEAP_SIZE: usize = 2048;
 
 type SpiBusType<'b> = Spi<'b, embassy_rp::peripherals::SPI0, embassy_rp::spi::Async>;
 static SPI_BUS: StaticCell<Mutex<CriticalSectionRawMutex, SpiBusType>> = StaticCell::new();
@@ -60,6 +70,13 @@ type DisplayType<'a, 'b, 'c> = GraphicsMode<
         Output<'c>,
     >,
 >;
+#[embassy_executor::task]
+async fn monitor_memory_usage() {
+    loop {
+        defmt::info!("mem_usage: {}", HEAP.used());
+        Timer::after(MEM_USAGE_TRACK_INTERVAL).await;
+    }
+}
 
 pub async fn text_app(mut display: DisplayPartition<DisplayType<'_, '_, '_>>) {
     let character_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
@@ -111,10 +128,6 @@ async fn line_app(mut display: DisplayPartition<DisplayType<'_, '_, '_>>) -> () 
 async fn main(spawner: Spawner) {
     defmt::info!("hello from defmt");
     {
-        #[cfg(feature = "compressed")]
-        const HEAP_SIZE: usize = 4096 + BUF_SIZE;
-        #[cfg(not(feature = "compressed"))]
-        const HEAP_SIZE: usize = 2048;
         use core::mem::MaybeUninit;
         static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
         #[allow(static_mut_refs)]
@@ -122,6 +135,14 @@ async fn main(spawner: Spawner) {
             HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE)
         }
     }
+    #[allow(static_mut_refs)]
+    let ptr = unsafe { BUF.as_mut_ptr() } as *mut u16;
+    assert_eq!(
+        ptr.align_offset(::core::mem::align_of::<u16>()),
+        0,
+        "Misaligned pointer for u16"
+    );
+    spawner.spawn(monitor_memory_usage()).unwrap();
 
     let p = embassy_rp::init(Default::default());
 

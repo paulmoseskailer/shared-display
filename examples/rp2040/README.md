@@ -14,3 +14,13 @@ A version that uses framebuffer compression can be run with
 cargo run --features compressed
 ```
 
+# How to Track Memory Usage
+
+Without framebuffer compression the heap memory usage will be constant.
+To track the heap usage with compression, run
+
+```bash
+cargo run --features compressed | tee log.txt
+python plot_usage.py
+```
+
