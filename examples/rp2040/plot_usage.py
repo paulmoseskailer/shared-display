@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 data = []
 time_ms = 0
-interval = 500  # Match with Timer::after() duration
+interval = 200  # Match with MEM_USAGE_TRACK_INTERVAL in src/main.rs
 
 with open("log.txt") as f:
     for line in f:

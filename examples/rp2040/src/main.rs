@@ -48,9 +48,13 @@ static HEAP: Heap = Heap::empty();
 
 const SCREEN_WIDTH: usize = 128;
 const SCREEN_HEIGHT: usize = 96;
+
+const MEM_USAGE_TRACK_INTERVAL: Duration = Duration::from_millis(200);
+
 const BUF_SIZE: usize = SCREEN_WIDTH * SCREEN_HEIGHT * 2;
 static mut BUF: [u8; BUF_SIZE] = [0; BUF_SIZE];
 
+#[cfg(feature = "compressed")]
 const COMPRESSION_GAINS: usize = 8_000;
 #[cfg(feature = "compressed")]
 const HEAP_SIZE: usize = 2048 + BUF_SIZE - COMPRESSION_GAINS;
@@ -70,7 +74,7 @@ type DisplayType<'a, 'b, 'c> = GraphicsMode<
 async fn monitor_memory_usage() {
     loop {
         defmt::info!("mem_usage: {}", HEAP.used());
-        Timer::after(Duration::from_millis(200)).await;
+        Timer::after(MEM_USAGE_TRACK_INTERVAL).await;
     }
 }
 

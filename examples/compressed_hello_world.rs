@@ -37,7 +37,7 @@ async fn text_app(mut display: CompressedDisplayPartition<DisplayType>) -> () {
 
     loop {
         Text::with_text_style(
-            "chello \n world",
+            "hello \n world",
             Point::new(SCREEN_WIDTH as i32 / 4, SCREEN_HEIGHT as i32 / 3),
             character_style,
             text_style,

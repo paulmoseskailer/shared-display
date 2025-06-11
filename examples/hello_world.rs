@@ -36,7 +36,7 @@ async fn text_app(mut display: DisplayPartition<DisplayType>) -> () {
 
     loop {
         Text::with_text_style(
-            "uhello \n world",
+            "hello \n world",
             Point::new(SCREEN_WIDTH as i32 / 4, SCREEN_HEIGHT as i32 / 3),
             character_style,
             text_style,
