@@ -36,7 +36,7 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
         &*self.inner
     }
 
-    /// Check whether the buffer still encodes as many elements as it should.
+    /// Checks whether the buffer still encodes as many elements as it should.
     pub fn check_integrity(&self) -> Result<(), ()> {
         self.inner.iter().for_each(|&(_color, run_len)| {
             assert_ne!(run_len, 0, "found run with length 0");
@@ -141,7 +141,7 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
         }
     }
 
-    /// Empty the buffer and refill it with a new value.
+    /// Empties the buffer and refill it with a new value.
     pub fn clear_and_refill(&mut self, new_value: B) {
         // empty first
         self.inner.clear();
@@ -158,6 +158,7 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
     }
 }
 
+/// A decompressing Iterator for an RLE-encoded [`CompressedBuffer`].
 #[derive(Clone)]
 pub struct DecompressingIter<'a, B: Copy + PartialEq + Default> {
     current_run: Option<(B, u8)>,
@@ -166,6 +167,7 @@ pub struct DecompressingIter<'a, B: Copy + PartialEq + Default> {
 }
 
 impl<'a, B: Copy + PartialEq + Default> DecompressingIter<'a, B> {
+    /// Creates a new decompressing iterator from a vector of runs.
     pub fn new(buffer: &'a Vec<(B, u8)>) -> Self {
         let mut compressed_buffer_iter = buffer.iter();
         let current_run = compressed_buffer_iter.next().map(|&r| r);
