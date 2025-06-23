@@ -9,19 +9,19 @@
 //! ## Sharing a [`SimulatorDisplay`](https://github.com/embedded-graphics/simulator)
 //!
 //! ```rust,no_run
-//! use embassy_executor::Spawner;
-//! use embassy_time::Timer;
-//! use embedded_graphics::{
-//!     geometry::Size,
-//!     mono_font::{MonoTextStyle, ascii::FONT_10X20},
-//!     pixelcolor::BinaryColor,
-//!     prelude::*,
-//!     primitives::{Line, PrimitiveStyle, Rectangle, StyledDrawable},
-//!     text::{Alignment, Baseline, Text, TextStyleBuilder},
-//! };
-//! use embedded_graphics_simulator::{
-//!     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
-//! };
+//! # use embassy_executor::Spawner;
+//! # use embassy_time::Timer;
+//! # use embedded_graphics::{
+//! #    geometry::Size,
+//! #    mono_font::{MonoTextStyle, ascii::FONT_10X20},
+//! #    pixelcolor::BinaryColor,
+//! #    prelude::*,
+//! #    primitives::{Line, PrimitiveStyle, Rectangle, StyledDrawable},
+//! #    text::{Alignment, Baseline, Text, TextStyleBuilder},
+//! # };
+//! # use embedded_graphics_simulator::{
+//! #     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
+//! # };
 //! use shared_display::{DisplayPartition, FlushResult, SharedDisplay};
 //!
 //! type DisplayType = SimulatorDisplay<BinaryColor>;
