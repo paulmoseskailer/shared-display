@@ -11,7 +11,7 @@ use embedded_graphics::{
 use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
-use shared_display::{DisplayPartition, FlushResult, ResizeEvent, SharedDisplay};
+use shared_display::{AppEvent, DisplayPartition, FlushResult, SharedDisplay};
 
 type DisplayType = SimulatorDisplay<BinaryColor>;
 
@@ -79,7 +79,7 @@ async fn line_app(mut display: DisplayPartition<DisplayType>) -> () {
         match shared_display::EVENTS.try_receive() {
             Err(_) => continue,
             Ok(event) => match event {
-                ResizeEvent::AppClosed(area) => display.envelope(&area),
+                AppEvent::AppClosed(area) => display.envelope(&area),
             },
         };
     }

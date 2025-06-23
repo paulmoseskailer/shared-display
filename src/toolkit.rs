@@ -25,7 +25,7 @@ static DRAW_TRACKERS: [DrawTracker; MAX_APPS_PER_SCREEN] =
 /// Interval between to flushes.
 pub const FLUSH_INTERVAL: Duration = Duration::from_millis(20);
 /// Event queue for all apps to access.
-pub static EVENTS: Channel<CriticalSectionRawMutex, ResizeEvent, EVENT_QUEUE_SIZE> = Channel::new();
+pub static EVENTS: Channel<CriticalSectionRawMutex, AppEvent, EVENT_QUEUE_SIZE> = Channel::new();
 
 /// Error Type for creating new screen partitions.
 #[derive(Debug)]
@@ -33,12 +33,6 @@ pub enum NewPartitionError {
     Overlaps,
     OutsideParent,
     DisplaySide(DisplaySidePartitioningError),
-}
-
-/// Type of outcome for starting an app.
-pub enum AppStart {
-    Success,
-    Failure,
 }
 
 /// Whether to continue flushing or not.
@@ -49,7 +43,7 @@ pub enum FlushResult {
 }
 
 /// Change in size of other apps on the screen.
-pub enum ResizeEvent {
+pub enum AppEvent {
     AppClosed(Rectangle),
 }
 
@@ -138,7 +132,7 @@ where
         area: Rectangle,
     ) -> Result<(), NewPartitionError>
     where
-        F: AsyncFnMut(DisplayPartition<D>) -> (),
+        F: AsyncFnMut(DisplayPartition<D>),
         for<'b> F::CallRefFuture<'b>: 'static,
     {
         let partition = self.new_partition(area).await?;
@@ -203,7 +197,7 @@ where
 pub(crate) async fn launch_future(app_future: Pin<Box<dyn Future<Output = ()>>>, area: Rectangle) {
     app_future.await;
 
-    EVENTS.send(ResizeEvent::AppClosed(area)).await;
+    EVENTS.send(AppEvent::AppClosed(area)).await;
 }
 
 /// Launches an app from inside another app.
@@ -211,8 +205,7 @@ pub async fn launch_app_in_app<F, D>(
     spawner: &'static Spawner,
     mut app_fn: F,
     partition: DisplayPartition<D>,
-) -> AppStart
-where
+) where
     D: SharableBufferedDisplay,
     F: AsyncFnMut(DisplayPartition<D>) -> (),
     for<'b> F::CallRefFuture<'b>: 'static,
@@ -220,6 +213,4 @@ where
     let area = partition.area;
     let fut = app_fn(partition);
     spawner.must_spawn(launch_future(Box::pin(fut), area));
-
-    AppStart::Success
 }
