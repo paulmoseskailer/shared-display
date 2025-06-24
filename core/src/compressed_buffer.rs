@@ -52,7 +52,9 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
         Err(())
     }
 
-    pub(crate) fn set_at_index(&mut self, target_index: usize, new_value: B) {
+    // Finds the run that contains the decompressed target_index.
+    // Returns run_index and decompressed start index for that run.
+    fn find_run_with_index(&self, target_index: usize) -> Option<(usize, usize)> {
         let mut current_index = 0;
         let mut run_index = 0;
         for (_color, run_length) in self.inner.iter() {
@@ -62,24 +64,34 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
             current_index += *run_length as usize;
             run_index += 1;
         }
+
         if run_index == self.inner.len() {
-            panic!("set_pixel: did not find run to break up");
+            None
+        } else {
+            Some((run_index, current_index))
         }
+    }
+
+    pub(crate) fn set_at_index(&mut self, target_index: usize, new_value: B) -> Result<(), ()> {
+        let (run_index, decompressed_run_start) =
+            self.find_run_with_index(target_index).ok_or(())?;
 
         let (buffer_value_previously, run_len_previously) = &self.inner[run_index];
         if new_value == *buffer_value_previously {
             // nothing to do, color already set
-            return;
+            return Ok(());
         }
         let (buffer_previously, run_len_previously) =
             (*buffer_value_previously, *run_len_previously);
 
-        let run_before_len = target_index - current_index;
-        let run_after_len = (current_index + run_len_previously as usize) - (target_index + 1);
+        let run_before_len = target_index - decompressed_run_start;
+        let run_after_len =
+            (decompressed_run_start + run_len_previously as usize) - (target_index + 1);
 
         let have_run_before = run_before_len > 0;
         let have_run_after = run_after_len > 0;
-        // check if we can merge with previous run
+
+        // Check if we can merge with previous run
         if !have_run_before && run_index > 0 {
             let (color_before, run_len_before) = &self.inner[run_index - 1];
             if *color_before == new_value && *run_len_before < 255 {
@@ -100,11 +112,12 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
                         }
                     }
                 }
-                return;
+                // Merged before, possibly after, done
+                return Ok(());
             }
         }
 
-        // check if we can merge with next run
+        // check if we can merge with next run (even if we can't merge with previous)
         if !have_run_after && run_index < (self.inner.len() - 1) {
             let (color_after, run_len_after) = &self.inner[run_index + 1];
             if *color_after == new_value && *run_len_after < 255 {
@@ -113,7 +126,8 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
                 if self.inner[run_index].1 == 0 {
                     self.inner.remove(run_index);
                 }
-                return;
+                // Merged with next run, done
+                return Ok(());
             }
         }
 
@@ -139,6 +153,109 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
                 target_index
             );
         }
+
+        Ok(())
+    }
+
+    pub(crate) fn set_at_index_contiguous(
+        &mut self,
+        target_index: usize,
+        new_value: B,
+        mut num_elements: usize,
+    ) -> Result<(), ()> {
+        let (mut run_index, mut decompressed_run_start) =
+            self.find_run_with_index(target_index).ok_or(())?;
+        let (mut color_before, mut run_len) = self.inner[run_index];
+        let next_run_start = decompressed_run_start + run_len as usize;
+        let mut elements_left_in_run = next_run_start - target_index;
+
+        // check if this run already has the correct color
+        while color_before == new_value {
+            run_index += 1;
+            decompressed_run_start += run_len as usize;
+            num_elements = num_elements.saturating_sub(elements_left_in_run as usize);
+            (color_before, run_len) = self.inner[run_index];
+            elements_left_in_run = run_len as usize;
+
+            if num_elements == 0 {
+                return Ok(());
+            }
+        }
+
+        // deal with found run (will end up being right before contiguous block)
+        let elements_before_target: u8 =
+            (target_index - decompressed_run_start).try_into().unwrap();
+        if elements_before_target > 0 {
+            // shorten found run
+            self.inner[run_index].1 = elements_before_target;
+        } else {
+            // target element is first element of the run, so remove it entirely
+            self.inner.remove(run_index);
+        }
+
+        // where to insert new block and elements_left_in_run
+        let new_blocks_index = match elements_before_target {
+            // found run was removed, insert in its place
+            0 => run_index,
+            // found run was shortened, insert right after it
+            _ => run_index + 1,
+        };
+
+        // 1. Remove num_elements elements
+
+        // check if contiguous block fits inside current run
+        if num_elements < elements_left_in_run {
+            // insert the new elements (known to be less than 255)
+            self.inner.insert(
+                new_blocks_index,
+                (new_value, (num_elements).try_into().unwrap()),
+            );
+
+            // add the remaining elements after the new ones
+            self.inner.insert(
+                new_blocks_index + 1,
+                (
+                    color_before,
+                    (elements_left_in_run - num_elements).try_into().unwrap(),
+                ),
+            );
+            // everything inserted, return early.
+            return Ok(());
+        }
+
+        // new elements do not fit inside current run, remove more elements from next run(s)
+        let mut elements_to_remove = num_elements - elements_left_in_run;
+        while elements_to_remove > 0 {
+            let (_color, next_run_len) = self.inner[new_blocks_index];
+            if elements_to_remove >= next_run_len as usize {
+                // still need to remove elements than the next run contains, remove entire run
+                elements_to_remove -= next_run_len as usize;
+                self.inner.remove(new_blocks_index);
+            } else {
+                // need to remove less elements than contained in next run, shorten the run
+                self.inner[new_blocks_index].1 -=
+                    <usize as TryInto<u8>>::try_into(elements_to_remove).unwrap();
+                elements_to_remove = 0;
+            }
+        }
+
+        // 2. Insert num_elements new values
+        let full_runs = num_elements / 255;
+        for _ in 0..full_runs {
+            self.inner.insert(run_index + 1, (new_value, 255));
+        }
+        let remainder = num_elements - (full_runs * 255);
+        if remainder > 0 {
+            self.inner
+                .insert(run_index + 1, (new_value, remainder.try_into().unwrap()));
+        }
+
+        if self.check_integrity().is_err() {
+            panic!(
+                "in set_at_index_contiguous({target_index}, {num_elements}) check_integrity failed at the end",
+            );
+        }
+        Ok(())
     }
 
     /// Empties the buffer and refill it with a new value.
@@ -239,16 +356,17 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_before() {
+    fn test_merge_before() -> Result<(), ()> {
         let size = Size::new(4, 4); // 16 pixels total
         let mut buffer = CompressedBuffer::<u8>::new(size, 30);
         buffer.check_integrity().unwrap();
 
-        buffer.set_at_index(2, 52);
+        buffer.set_at_index(2, 52)?;
         assert_eq!(buffer.inner, Box::new(vec![(30, 2), (52, 1), (30, 13)]));
 
-        buffer.set_at_index(3, 52);
+        buffer.set_at_index(3, 52)?;
         assert_eq!(buffer.inner, Box::new(vec![(30, 2), (52, 2), (30, 12)]));
+        Ok(())
     }
 
     #[test]
@@ -257,61 +375,63 @@ mod tests {
         let mut buffer = CompressedBuffer::<u8>::new(size, 30);
         buffer.check_integrity().unwrap();
 
-        buffer.set_at_index(2, 52);
+        buffer.set_at_index(2, 52).unwrap();
         assert_eq!(buffer.inner, Box::new(vec![(30, 2), (52, 1), (30, 13)]));
 
-        buffer.set_at_index(1, 52);
+        buffer.set_at_index(1, 52).unwrap();
         assert_eq!(buffer.inner, Box::new(vec![(30, 1), (52, 2), (30, 13)]));
     }
 
     #[test]
-    fn test_merge_before_and_after() {
+    fn test_merge_before_and_after() -> Result<(), ()> {
         let size = Size::new(128, 2); // 256 pixels total
         let mut buffer = CompressedBuffer::<u8>::new(size, 0);
-        buffer.check_integrity().unwrap();
+        buffer.check_integrity()?;
         assert_eq!(buffer.inner, Box::new(vec![(0, 255), (0, 1)]));
 
-        buffer.set_at_index(0, 27);
+        buffer.set_at_index(0, 27)?;
         assert_eq!(buffer.inner, Box::new(vec![(27, 1), (0, 254), (0, 1)]));
 
-        buffer.set_at_index(2, 27);
+        buffer.set_at_index(2, 27)?;
         assert_eq!(
             buffer.inner,
             Box::new(vec![(27, 1), (0, 1), (27, 1), (0, 252), (0, 1)])
         );
 
-        buffer.set_at_index(1, 27);
+        buffer.set_at_index(1, 27)?;
         assert_eq!(buffer.inner, Box::new(vec![(27, 3), (0, 252), (0, 1)]));
+        Ok(())
     }
 
     #[test]
-    fn test_no_merge_over_255() {
+    fn test_no_merge_over_255() -> Result<(), ()> {
         let size = Size::new(257, 1);
         let mut buffer = CompressedBuffer::<u8>::new(size, 0);
-        buffer.check_integrity().unwrap();
+        buffer.check_integrity()?;
         assert_eq!(buffer.inner, Box::new(vec![(0, 255), (0, 2)]));
-        buffer.set_at_index(254, 3);
+        buffer.set_at_index(254, 3)?;
 
         assert_eq!(buffer.inner, Box::new(vec![(0, 254), (3, 1), (0, 2)]));
-        buffer.set_at_index(254, 0);
+        buffer.set_at_index(254, 0)?;
         assert_eq!(buffer.inner, Box::new(vec![(0, 255), (0, 2)]));
+        Ok(())
     }
 
     #[test]
-    fn test_iter() {
+    fn test_iter() -> Result<(), ()> {
         let width = 64;
         let height = 32;
         let size = Size::new(width, height);
         let mut buffer = CompressedBuffer::<u8>::new(size, 0);
-        buffer.check_integrity().unwrap();
+        buffer.check_integrity()?;
 
         let index1: usize = (height / 2 * width + width / 2) as usize;
         let index2: usize = (width * height - 1) as usize;
-        buffer.set_at_index(0, 1);
-        buffer.set_at_index(index1, 1);
-        buffer.set_at_index(index2, 1);
+        buffer.set_at_index(0, 1)?;
+        buffer.set_at_index(index1, 1)?;
+        buffer.set_at_index(index2, 1)?;
 
-        buffer.check_integrity().unwrap();
+        buffer.check_integrity()?;
         let mut iter = DecompressingIter::new(unsafe { &*buffer.get_ptr_to_inner() });
 
         // check cloned iter
@@ -333,5 +453,47 @@ mod tests {
         iter.advance_by(index2 - (index1 + 2)).unwrap();
         assert_eq!(iter.next(), Some(1));
         assert_eq!(iter.next(), None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_set_contiguous() -> Result<(), ()> {
+        let size = Size::new(128, 4); // 512 pixels total
+        let mut buffer = CompressedBuffer::<u8>::new(size, 0);
+        buffer.check_integrity()?;
+        assert_eq!(buffer.inner, Box::new(vec![(0, 255), (0, 255), (0, 2)]));
+
+        buffer.set_at_index_contiguous(0, 27, 100)?;
+
+        assert_eq!(
+            buffer.inner,
+            Box::new(vec![(27, 100), (0, 155), (0, 255), (0, 2)])
+        );
+
+        buffer.set_at_index_contiguous(50, 84, 462)?;
+
+        assert_eq!(buffer.inner, Box::new(vec![(27, 50), (84, 207), (84, 255)]));
+        buffer.check_integrity()?;
+
+        let bigger_size = Size::new(128, 8); // 1024 pixels total
+        let mut buffer = CompressedBuffer::<u8>::new(bigger_size, 0);
+        buffer.check_integrity()?;
+
+        assert_eq!(
+            buffer.inner,
+            Box::new(vec![(0, 255), (0, 255), (0, 255), (0, 255), (0, 4)])
+        );
+
+        // set the last 550 pixels: 1024 - 550 = 474
+        buffer.set_at_index_contiguous(474, 123, 550)?;
+
+        assert_eq!(
+            buffer.inner,
+            Box::new(vec![(0, 255), (0, 219), (123, 40), (123, 255), (123, 255)])
+        );
+        buffer.check_integrity()?;
+
+        Ok(())
     }
 }

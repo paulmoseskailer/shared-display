@@ -45,6 +45,16 @@ async fn text_app(mut display: CompressedDisplayPartition<DisplayType>) -> () {
         .draw(&mut display)
         .await
         .unwrap();
+        display
+            .fill_solid(
+                &Rectangle::new(
+                    Point::new(SCREEN_WIDTH as i32 / 4, SCREEN_HEIGHT as i32 * 2 / 3),
+                    Size::new(8, 4),
+                ),
+                BinaryColor::On,
+            )
+            .await
+            .unwrap();
         Timer::after_millis(500).await;
         display.clear(BinaryColor::Off).await.unwrap();
         Timer::after_millis(500).await;

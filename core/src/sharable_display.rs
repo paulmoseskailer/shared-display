@@ -207,9 +207,9 @@ where
     }
 }
 
-impl<B, D> DrawTarget for DisplayPartition<D>
+impl<D> DrawTarget for DisplayPartition<D>
 where
-    D: SharableBufferedDisplay<BufferElement = B>,
+    D: SharableBufferedDisplay,
 {
     type Color = D::Color;
     type Error = D::Error;

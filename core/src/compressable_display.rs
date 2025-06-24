@@ -104,6 +104,7 @@ where
 {
     type Color = D::Color;
     type Error = D::Error;
+
     async fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
@@ -118,7 +119,8 @@ where
                     .for_each(|p| {
                         let target_index = D::calculate_buffer_index(p.0, self.area.size);
                         self.buffer
-                            .set_at_index(target_index, D::map_to_buffer_element(p.1));
+                            .set_at_index(target_index, D::map_to_buffer_element(p.1))
+                            .unwrap();
                     });
                 if self.buffer.check_integrity().is_err() {
                     panic!("after draw_iter check rle failed");
@@ -128,7 +130,27 @@ where
         Ok(())
     }
 
-    // TODO: implement fill_contiguous, fill_solid efficiently
+    async fn fill_solid(
+        &mut self,
+        area: &Rectangle,
+        color: Self::Color,
+    ) -> Result<(), Self::Error> {
+        let buffer_element = D::map_to_buffer_element(color);
+
+        // fill row-by-row
+        let row_starts = core::iter::repeat(area.top_left)
+            .take(area.size.height as usize)
+            .enumerate()
+            .map(|(i, p)| p + Point::new(0, i as i32));
+        for row_start in row_starts {
+            let target_index = D::calculate_buffer_index(row_start, self.area.size);
+            self.buffer
+                .set_at_index_contiguous(target_index, buffer_element, area.size.width as usize)
+                .unwrap();
+        }
+        Ok(())
+    }
+
     async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         self.buffer
             .clear_and_refill(D::map_to_buffer_element(color));
