@@ -15,6 +15,13 @@ cargo run --example hello_world
 ```
 
 For an example on the Raspberry Pi Pico, see [`examples/rp2040`](./examples/rp2040).
+Examples don't terminate.
+
+## Why are there no tests?
+
+There are tests in the `core` subcrate.
+In the top-level crate, testing would require an `embassy_executor::Spawner`.
+Since I do not know of a convenient way to test code that expects a spawner, the examples serve as tests for now: if they run without crashing, the test is considered passed.
 
 ## How to add support for a new display type
 
@@ -30,14 +37,6 @@ Examples on how to use the `SharedDisplay` (with the simulator) can be found in 
 To add integrated framebuffer compression (using RLE-encoding), a display needs to implement the [`CompressableDisplay`](./core/src/compressed.rs) trait.
 Then, [`SharedCompressedDisplay`](./src/toolkit_compressed.rs#L24) is a drop-in replacement for `SharedDisplay`, except for the way it handles flushing. See the documentation for details and the example in [`examples/compressed_hello_world.rs`](./examples/compressed_hello_world.rs).
 
-## Roadmap
-
-- [x] `SharableBufferedDisplay` Trait
-- [x] basic toolkit functionality for easy development
-- [ ] handle resizing of partitions at runtime
-- [ ] provide an elegant solution for non-buffered displays
-- [x] integrate buffer compression
-- [ ] submit PRs for dependencies: `embedded-graphics`, `simulator`(, `ssd1351`)
 
 ## Some Notes on Design Decisions
 

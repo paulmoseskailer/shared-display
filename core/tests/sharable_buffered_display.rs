@@ -7,7 +7,7 @@ use embedded_graphics::{
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
 };
-use shared_display_core::{DisplaySidePartitioningError, DrawTracker, SharableBufferedDisplay};
+use shared_display_core::{DrawTracker, NewPartitionError, SharableBufferedDisplay};
 
 const DISP_WIDTH: usize = 16;
 const DISP_HEIGHT: usize = 2;
@@ -85,7 +85,7 @@ impl SharableBufferedDisplay for FakeDisplay {
 }
 
 #[tokio::test]
-async fn simple_split_clear() -> Result<(), DisplaySidePartitioningError> {
+async fn simple_split_clear() -> Result<(), NewPartitionError> {
     let buffer = [0; NUM_PIXELS];
     let mut d = FakeDisplay { buffer };
     assert_eq!(*d.flush(), [0; NUM_PIXELS]);
@@ -113,15 +113,15 @@ async fn simple_split_clear() -> Result<(), DisplaySidePartitioningError> {
 }
 
 #[tokio::test]
-async fn simple_split_draw_iter() -> Result<(), DisplaySidePartitioningError> {
+async fn simple_split_draw_iter() -> Result<(), NewPartitionError> {
     let buffer = [0; NUM_PIXELS];
     let mut d = FakeDisplay { buffer };
     assert_eq!(*d.flush(), [0; NUM_PIXELS]);
 
     let left_area = Rectangle::new(Point::new(0, 0), Size::new(8, 2));
-    let mut left_display = d.new_partition(left_area, &DRAW_TRACKERS[0]).unwrap();
+    let mut left_display = d.new_partition(left_area, &DRAW_TRACKERS[0])?;
     let right_area = Rectangle::new(Point::new(8, 0), Size::new(8, 2));
-    let mut right_display = d.new_partition(right_area, &DRAW_TRACKERS[1]).unwrap();
+    let mut right_display = d.new_partition(right_area, &DRAW_TRACKERS[1])?;
 
     let rect = Rectangle::new(Point::new(0, 0), Size::new(2, 2));
     rect.into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))

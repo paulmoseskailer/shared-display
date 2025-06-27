@@ -28,9 +28,9 @@ async fn recursive_split_app(
     mut display: DisplayPartition<DisplayType>,
     spawner: &'static Spawner,
 ) -> () {
+    let start = Instant::now();
     let max_x: i32 = (display.bounding_box().size.width - 1).try_into().unwrap();
     let max_y: i32 = (display.bounding_box().size.height - 1).try_into().unwrap();
-    let start = Instant::now();
 
     loop {
         Line::new(Point::new(0, 0), Point::new(max_x, max_y))
@@ -57,7 +57,15 @@ async fn recursive_split_app(
         }
     }
     // recursive case
-    let (left_display, right_display) = display.split_vertically().unwrap();
+    let bb = display.bounding_box();
+    let half_width = bb.size.width / 2;
+    let half_size = Size::new(half_width, bb.size.height);
+    let left_area = Rectangle::new(bb.top_left, half_size);
+    let right_area = Rectangle::new(
+        Point::new(bb.top_left.x + half_width as i32, bb.top_left.y),
+        half_size,
+    );
+    let (left_display, right_display) = display.split_in_two(left_area, right_area).unwrap();
     let new_recursion_level = recursion_level - 1;
     launch_app_in_app(
         spawner,

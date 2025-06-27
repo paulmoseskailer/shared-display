@@ -343,7 +343,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_buffer_clear() {
+    fn buffer_clear() {
         let size = Size::new(128, 4); // 512 pixels total
         let mut buffer = CompressedBuffer::<u8>::new(size, 45);
         buffer.check_integrity().unwrap();
@@ -356,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_before() -> Result<(), ()> {
+    fn merge_before() -> Result<(), ()> {
         let size = Size::new(4, 4); // 16 pixels total
         let mut buffer = CompressedBuffer::<u8>::new(size, 30);
         buffer.check_integrity().unwrap();
@@ -370,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_after() {
+    fn merge_after() {
         let size = Size::new(4, 4); // 16 pixels total
         let mut buffer = CompressedBuffer::<u8>::new(size, 30);
         buffer.check_integrity().unwrap();
@@ -383,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_before_and_after() -> Result<(), ()> {
+    fn merge_before_and_after() -> Result<(), ()> {
         let size = Size::new(128, 2); // 256 pixels total
         let mut buffer = CompressedBuffer::<u8>::new(size, 0);
         buffer.check_integrity()?;
@@ -404,7 +404,7 @@ mod tests {
     }
 
     #[test]
-    fn test_no_merge_over_255() -> Result<(), ()> {
+    fn no_merge_over_255() -> Result<(), ()> {
         let size = Size::new(257, 1);
         let mut buffer = CompressedBuffer::<u8>::new(size, 0);
         buffer.check_integrity()?;
@@ -418,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn test_iter() -> Result<(), ()> {
+    fn iter() -> Result<(), ()> {
         let width = 64;
         let height = 32;
         let size = Size::new(width, height);

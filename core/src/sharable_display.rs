@@ -12,17 +12,6 @@ use embedded_graphics::{
 /// Maximum number of apps allowed on the screen concurrently.
 pub const MAX_APPS_PER_SCREEN: usize = 8;
 
-/// Error type for creating a partition.
-#[derive(Debug)]
-pub enum DisplaySidePartitioningError {
-    /// Cannot create partitions less than 8 pixels wide.
-    PartitionTooSmall,
-    /// A partition should have width divisible by 8.
-    PartitionBadWidth,
-    /// Display width must be divisible by both pixels as well as buffer elements.
-    BufferPixelMismatch,
-}
-
 /// A buffered [`DrawTarget`] that can be shared among multiple apps.
 pub trait SharableBufferedDisplay: DrawTarget {
     /// The type of elements saved to the buffer - may differ from [`DrawTarget::Color`].
@@ -42,29 +31,44 @@ pub trait SharableBufferedDisplay: DrawTarget {
         &mut self,
         area: Rectangle,
         draw_tracker: &'static DrawTracker,
-    ) -> Result<DisplayPartition<Self>, DisplaySidePartitioningError> {
-        if area.size.width < 8 {
-            return Err(DisplaySidePartitioningError::PartitionTooSmall);
-        }
-
+    ) -> Result<DisplayPartition<Self>, NewPartitionError> {
         let parent_size = self.bounding_box().size;
-        let buffer_len = self.get_buffer().len();
-        let pixels_per_buffer_el = (parent_size.width * parent_size.height) as usize / buffer_len;
-        if pixels_per_buffer_el > 0 && parent_size.width % pixels_per_buffer_el as u32 != 0 {
-            return Err(DisplaySidePartitioningError::BufferPixelMismatch);
-        }
 
-        if area.size.width % 8 != 0 {
-            return Err(DisplaySidePartitioningError::PartitionBadWidth);
-        }
-
-        Ok(DisplayPartition::new(
-            self.get_buffer(),
-            parent_size,
-            area,
-            draw_tracker,
-        ))
+        DisplayPartition::new(self.get_buffer(), parent_size, area, draw_tracker)
     }
+}
+
+/// Error Type for creating new screen partitions.
+#[derive(Debug, PartialEq, Eq)]
+pub enum NewPartitionError {
+    /// Overlaps with existing partitions.
+    Overlaps,
+    /// Area outside the parent display.
+    OutsideParent,
+    /// Cannot create partitions less than 8 pixels wide.
+    TooSmall,
+    /// A partition should have width divisible by 8.
+    BadWidth,
+    /// Display width must be divisible by both pixels as well as buffer elements.
+    BufferPixelMismatch,
+}
+
+/// Events from other apps that allow to alter a partition.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AppEvent {
+    /// Another app was closed
+    AppClosed(Rectangle),
+}
+
+/// Things that might go wrong trying to envelope the area of an app that closed.
+#[derive(Debug, PartialEq, Eq)]
+pub enum EnvelopeError {
+    /// The passed in AppEvent was not an AppClosed event
+    WrongEvent,
+    /// Enveloping the adjacent app would not result in a proper rectangle
+    NotAdjacent,
+    /// An error occured checking the new partition size
+    PartitioningError(NewPartitionError),
 }
 
 /// A partition of a [`SharableBufferedDisplay`].
@@ -82,59 +86,64 @@ pub struct DisplayPartition<D: SharableBufferedDisplay + ?Sized> {
     draw_tracker: &'static DrawTracker,
 }
 
-impl<D> ContainsPoint for DisplayPartition<D>
-where
-    D: SharableBufferedDisplay + ?Sized,
-{
-    fn contains(&self, p: Point) -> bool {
-        self.area.contains(p)
-    }
-}
-
 impl<C, B, D> DisplayPartition<D>
 where
     C: PixelColor,
     D: SharableBufferedDisplay<BufferElement = B, Color = C> + ?Sized,
 {
+    fn check_partition_ok(
+        area: &Rectangle,
+        parent_size: Size,
+        buffer_len: usize,
+    ) -> Result<(), NewPartitionError> {
+        if area.size.width < 8 {
+            return Err(NewPartitionError::TooSmall);
+        }
+
+        if Rectangle::new_at_origin(parent_size).intersection(area) != *area {
+            return Err(NewPartitionError::OutsideParent);
+        }
+
+        let pixels_per_buffer_el = (parent_size.width * parent_size.height) as usize / buffer_len;
+        if pixels_per_buffer_el > 0 && parent_size.width % pixels_per_buffer_el as u32 != 0 {
+            return Err(NewPartitionError::BufferPixelMismatch);
+        }
+
+        if area.size.width % 8 != 0 {
+            return Err(NewPartitionError::BadWidth);
+        }
+
+        Ok(())
+    }
+
     /// Creates a new partition.
     pub fn new(
         buffer: &mut [B],
         parent_size: Size,
         area: Rectangle,
         draw_tracker: &'static DrawTracker,
-    ) -> DisplayPartition<D> {
-        DisplayPartition {
+    ) -> Result<DisplayPartition<D>, NewPartitionError> {
+        let buffer_len = buffer.len();
+        Self::check_partition_ok(&area, parent_size, buffer_len)?;
+
+        Ok(DisplayPartition {
             buffer: buffer.as_mut_ptr(),
             parent_size,
             buffer_len: buffer.len(),
             area,
             _display: core::marker::PhantomData,
             draw_tracker,
-        }
+        })
     }
 
-    /// Splits the partition vertically into two new partitions.
-    pub fn split_vertically(
+    /// Splits the partition into two new partitions.
+    pub fn split_in_two(
         &mut self,
-    ) -> Result<(DisplayPartition<D>, DisplayPartition<D>), DisplaySidePartitioningError> {
-        let size = self.area.size;
-
-        // ensure no bytes are split in half by rounding to a split of width multiple of 8
-        let left_area_width = ((size.width / 2) + 7) & !7;
-        let left_area = Rectangle::new(self.area.top_left, Size::new(left_area_width, size.height));
-        let right_area = Rectangle::new(
-            self.area.top_left + Point::new(left_area_width.try_into().unwrap(), 0),
-            Size::new(size.width - left_area_width, size.height),
-        );
-
-        if left_area_width < 8 || size.width - left_area_width < 8 {
-            return Err(DisplaySidePartitioningError::PartitionTooSmall);
-        }
-
-        let pixels_per_buffer_el =
-            (self.parent_size.width * self.parent_size.height) as usize / self.buffer_len;
-        if pixels_per_buffer_el > 0 && self.parent_size.width % pixels_per_buffer_el as u32 != 0 {
-            return Err(DisplaySidePartitioningError::BufferPixelMismatch);
+        area1: Rectangle,
+        area2: Rectangle,
+    ) -> Result<(DisplayPartition<D>, DisplayPartition<D>), NewPartitionError> {
+        if !area1.intersection(&area2).is_zero_sized() {
+            return Err(NewPartitionError::Overlaps);
         }
 
         Ok((
@@ -144,25 +153,42 @@ where
                     core::slice::from_raw_parts_mut(self.buffer, self.buffer_len)
                 },
                 self.parent_size,
-                left_area,
+                area1,
                 self.draw_tracker,
-            ),
+            )?,
             DisplayPartition::new(
                 unsafe {
                     // SAFETY: self.buffer and self.buffer_len are initialized from slice in new
                     core::slice::from_raw_parts_mut(self.buffer, self.buffer_len)
                 },
                 self.parent_size,
-                right_area,
+                area2,
                 self.draw_tracker,
-            ),
+            )?,
         ))
     }
 
-    /// Increase this partition's size.
-    pub fn envelope(&mut self, other: &Rectangle) {
-        // TODO: do size checks and possibly return `DisplaySidePartitioningError`
-        self.area = self.area.envelope(other);
+    /// Increase this partition's size from an AppClosed event.
+    pub fn extend_area(&mut self, event: AppEvent) -> Result<(), EnvelopeError> {
+        let other = match event {
+            AppEvent::AppClosed(rect) => Ok(rect),
+            //_ => Err(EnvelopeError::WrongEvent),
+        }?;
+
+        // check aligment
+        let extends_above_or_below = (other.top_left.x == self.area.top_left.x)
+            && (other.size.width == self.area.size.width);
+        let extends_left_or_right = (other.top_left.y == self.area.top_left.y)
+            && (other.size.height == self.area.size.height);
+
+        if !(extends_above_or_below || extends_left_or_right) {
+            return Err(EnvelopeError::NotAdjacent);
+        }
+
+        self.area = self.area.envelope(&other);
+        Self::check_partition_ok(&self.area, self.parent_size, self.buffer_len)
+            .map_err(EnvelopeError::PartitioningError)?;
+        Ok(())
     }
 
     async fn draw_iter_internal<I>(
@@ -195,6 +221,15 @@ where
             }
         }
         Ok(())
+    }
+}
+
+impl<D> ContainsPoint for DisplayPartition<D>
+where
+    D: SharableBufferedDisplay + ?Sized,
+{
+    fn contains(&self, p: Point) -> bool {
+        self.area.contains(p)
     }
 }
 
@@ -303,5 +338,103 @@ impl DrawTracker {
         } else {
             AreaToFlush::None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use embedded_graphics::{pixelcolor::BinaryColor, prelude::OriginDimensions};
+
+    use super::*;
+
+    const WIDTH: u32 = 16;
+    const HEIGHT: u32 = 8;
+    const RESOLUTION: usize = (WIDTH * HEIGHT) as usize;
+    struct FakeDisplay {
+        buffer: [BinaryColor; RESOLUTION],
+    }
+    impl OriginDimensions for FakeDisplay {
+        fn size(&self) -> Size {
+            Size::new(WIDTH, HEIGHT)
+        }
+    }
+    impl DrawTarget for FakeDisplay {
+        type Color = BinaryColor;
+        type Error = ();
+        async fn draw_iter<I>(&mut self, _pixels: I) -> Result<(), Self::Error>
+        where
+            I: IntoIterator<Item = Pixel<Self::Color>>,
+        {
+            Ok(())
+        }
+    }
+    impl SharableBufferedDisplay for FakeDisplay {
+        type BufferElement = BinaryColor;
+        fn map_to_buffer_element(color: Self::Color) -> Self::BufferElement {
+            color
+        }
+        fn get_buffer(&mut self) -> &mut [Self::BufferElement] {
+            &mut self.buffer
+        }
+        fn calculate_buffer_index(point: Point, buffer_area_size: Size) -> usize {
+            point.y as usize * buffer_area_size.width as usize + point.x as usize
+        }
+    }
+    impl core::fmt::Debug for DisplayPartition<FakeDisplay> {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.debug_struct("FakeDisplay")
+                .field("buffer", &self.buffer)
+                .finish()
+        }
+    }
+
+    #[test]
+    fn new_partition_error() {
+        let mut display = FakeDisplay {
+            buffer: [BinaryColor::Off; RESOLUTION],
+        };
+        static DRAW_TRACKER: DrawTracker = DrawTracker::new();
+
+        let too_small = Rectangle::new_at_origin(Size::new(7, 8));
+        assert_eq!(
+            display.new_partition(too_small, &DRAW_TRACKER).unwrap_err(),
+            NewPartitionError::TooSmall
+        );
+
+        let too_big = Rectangle::new_at_origin(Size::new(WIDTH + 8, 8));
+        assert_eq!(
+            display.new_partition(too_big, &DRAW_TRACKER).unwrap_err(),
+            NewPartitionError::OutsideParent
+        );
+
+        let bad_width = Rectangle::new_at_origin(Size::new(WIDTH - 1, 8));
+        assert_eq!(
+            display.new_partition(bad_width, &DRAW_TRACKER).unwrap_err(),
+            NewPartitionError::BadWidth
+        );
+    }
+
+    #[test]
+    fn split_error() {
+        let mut display = FakeDisplay {
+            buffer: [BinaryColor::Off; RESOLUTION],
+        };
+        static DRAW_TRACKER: DrawTracker = DrawTracker::new();
+
+        let ok_area = Rectangle::new_at_origin(Size::new(WIDTH, HEIGHT));
+        let mut partition = display.new_partition(ok_area, &DRAW_TRACKER).unwrap();
+
+        let half_size = Size::new(WIDTH / 2, HEIGHT);
+        let left_area = Rectangle::new_at_origin(half_size);
+        let overlapping_right_area = Rectangle::new(Point::new((WIDTH / 4) as i32, 0), half_size);
+        assert_eq!(
+            partition
+                .split_in_two(left_area, overlapping_right_area)
+                .unwrap_err(),
+            NewPartitionError::Overlaps
+        );
+
+        let ok_right_area = Rectangle::new(Point::new((WIDTH / 2) as i32, 0), half_size);
+        partition.split_in_two(left_area, ok_right_area).unwrap();
     }
 }

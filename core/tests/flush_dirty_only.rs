@@ -3,9 +3,7 @@ use embedded_graphics::{
     Pixel, draw_target::DrawTarget, geometry::Point, pixelcolor::BinaryColor, prelude::*,
     primitives::Rectangle,
 };
-use shared_display_core::{
-    AreaToFlush, DisplaySidePartitioningError, DrawTracker, SharableBufferedDisplay,
-};
+use shared_display_core::{AreaToFlush, DrawTracker, NewPartitionError, SharableBufferedDisplay};
 
 const DISP_WIDTH: usize = 16;
 const DISP_HEIGHT: usize = 4;
@@ -66,7 +64,7 @@ impl SharableBufferedDisplay for FakeDisplay {
 }
 
 #[tokio::test]
-async fn flush_dirty_only() -> Result<(), DisplaySidePartitioningError> {
+async fn flush_dirty_only() -> Result<(), NewPartitionError> {
     let buffer = [0; NUM_PIXELS];
     let mut d = FakeDisplay { buffer };
 
