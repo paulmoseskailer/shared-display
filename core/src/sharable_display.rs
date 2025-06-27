@@ -53,6 +53,20 @@ pub enum NewPartitionError {
     BufferPixelMismatch,
 }
 
+/// Events from other apps that allow to alter a partition.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AppEvent {
+    AppClosed(Rectangle),
+}
+
+/// Things that might go wrong trying to envelope the area of an app that closed.
+#[derive(Debug, PartialEq, Eq)]
+pub enum EnvelopeError {
+    WrongEvent,
+    NotAligned,
+    PartitioningError(NewPartitionError),
+}
+
 /// A partition of a [`SharableBufferedDisplay`].
 pub struct DisplayPartition<D: SharableBufferedDisplay + ?Sized> {
     /// Mutable access to the entire display's buffer.
@@ -75,15 +89,14 @@ where
 {
     fn check_partition_ok(
         area: &Rectangle,
-        parent_area: Rectangle,
+        parent_size: Size,
         buffer_len: usize,
     ) -> Result<(), NewPartitionError> {
-        let parent_size = parent_area.size;
         if area.size.width < 8 {
             return Err(NewPartitionError::TooSmall);
         }
 
-        if parent_area.intersection(area) != *area {
+        if Rectangle::new_at_origin(parent_size).intersection(area) != *area {
             return Err(NewPartitionError::OutsideParent);
         }
 
@@ -107,7 +120,7 @@ where
         draw_tracker: &'static DrawTracker,
     ) -> Result<DisplayPartition<D>, NewPartitionError> {
         let buffer_len = buffer.len();
-        Self::check_partition_ok(&area, Rectangle::new_at_origin(parent_size), buffer_len)?;
+        Self::check_partition_ok(&area, parent_size, buffer_len)?;
 
         Ok(DisplayPartition {
             buffer: buffer.as_mut_ptr(),
@@ -151,10 +164,27 @@ where
         ))
     }
 
-    /// Increase this partition's size.
-    pub fn envelope(&mut self, other: &Rectangle) {
-        // TODO: do size checks and possibly return `NewPartitionError`
-        self.area = self.area.envelope(other);
+    /// Increase this partition's size from an AppClosed event.
+    pub fn extend_area(&mut self, event: AppEvent) -> Result<(), EnvelopeError> {
+        let other = match event {
+            AppEvent::AppClosed(rect) => Ok(rect),
+            //_ => Err(EnvelopeError::WrongEvent),
+        }?;
+
+        // check aligment
+        let extends_above_or_below = (other.top_left.x == self.area.top_left.x)
+            && (other.size.width == self.area.size.width);
+        let extends_left_or_right = (other.top_left.y == self.area.top_left.y)
+            && (other.size.height == self.area.size.height);
+
+        if !(extends_above_or_below || extends_left_or_right) {
+            return Err(EnvelopeError::NotAligned);
+        }
+
+        self.area = self.area.envelope(&other);
+        Self::check_partition_ok(&self.area, self.parent_size, self.buffer_len)
+            .map_err(EnvelopeError::PartitioningError)?;
+        Ok(())
     }
 
     async fn draw_iter_internal<I>(

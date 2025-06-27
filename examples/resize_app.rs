@@ -53,7 +53,7 @@ async fn text_app(mut display: DisplayPartition<DisplayType>) -> () {
     }
 }
 
-async fn line_app(mut display: DisplayPartition<DisplayType>) -> () {
+async fn line_app(mut display: DisplayPartition<DisplayType>) {
     loop {
         let max_x: i32 = (display.area.size.width - 1).try_into().unwrap();
         let max_y: i32 = (display.area.size.height - 1).try_into().unwrap();
@@ -79,7 +79,7 @@ async fn line_app(mut display: DisplayPartition<DisplayType>) -> () {
         match shared_display::EVENTS.try_receive() {
             Err(_) => continue,
             Ok(event) => match event {
-                AppEvent::AppClosed(area) => display.envelope(&area),
+                event @ AppEvent::AppClosed(_) => display.extend_area(event).unwrap(),
             },
         };
     }

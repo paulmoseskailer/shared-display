@@ -2,7 +2,7 @@
 extern crate alloc;
 use alloc::boxed::Box;
 
-use core::{future::Future, pin::Pin};
+use ::core::{future::Future, pin::Pin};
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
 use embassy_time::{Duration, Timer};
@@ -13,7 +13,7 @@ use embedded_graphics::{
 use static_cell::StaticCell;
 
 use shared_display_core::{
-    AreaToFlush, DisplayPartition, DrawTracker, MAX_APPS_PER_SCREEN, NewPartitionError,
+    AppEvent, AreaToFlush, DisplayPartition, DrawTracker, MAX_APPS_PER_SCREEN, NewPartitionError,
     SharableBufferedDisplay,
 };
 
@@ -32,11 +32,6 @@ pub static EVENTS: Channel<CriticalSectionRawMutex, AppEvent, EVENT_QUEUE_SIZE> 
 pub enum FlushResult {
     Continue,
     Abort,
-}
-
-/// Change in size of other apps on the screen.
-pub enum AppEvent {
-    AppClosed(Rectangle),
 }
 
 /// Shared Display.
