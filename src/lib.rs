@@ -126,6 +126,7 @@
 #![no_std]
 #![feature(async_fn_traits)]
 #![feature(iter_advance_by)]
+#![warn(missing_docs)]
 
 mod shared_display_ref;
 mod toolkit;

@@ -6,10 +6,7 @@ use ::core::{future::Future, pin::Pin};
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
 use embassy_time::{Duration, Timer};
-use embedded_graphics::{
-    geometry::{Point, Size},
-    primitives::Rectangle,
-};
+use embedded_graphics::{geometry::Size, primitives::Rectangle};
 use static_cell::StaticCell;
 
 use shared_display_core::{
@@ -30,12 +27,15 @@ pub static EVENTS: Channel<CriticalSectionRawMutex, AppEvent, EVENT_QUEUE_SIZE> 
 /// Whether to continue flushing or not.
 #[derive(PartialEq, Eq)]
 pub enum FlushResult {
+    /// Continue flushing
     Continue,
+    /// Abort the loop (e.g. when the simulator window was closed)
     Abort,
 }
 
 /// Shared Display.
 pub struct SharedDisplay<D: SharableBufferedDisplay> {
+    /// The actual display, locked with mutex
     pub real_display: Mutex<CriticalSectionRawMutex, D>,
     partition_areas: heapless::Vec<Rectangle, MAX_APPS_PER_SCREEN>,
     draw_trackers: &'static [DrawTracker; MAX_APPS_PER_SCREEN],
@@ -87,26 +87,6 @@ where
         }
 
         result
-    }
-
-    pub async fn partition_vertically(
-        &mut self,
-    ) -> Result<(DisplayPartition<D>, DisplayPartition<D>), NewPartitionError> {
-        let total_area = self.real_display.lock().await.bounding_box();
-        let half_size = Size::new(total_area.size.width / 2, total_area.size.height);
-        let left_area = Rectangle::new(total_area.top_left, half_size);
-        let right_area = Rectangle::new(
-            Point::new(
-                total_area.top_left.x + half_size.width as i32,
-                total_area.top_left.y,
-            ),
-            half_size,
-        );
-
-        let left_partition = self.new_partition(left_area).await?;
-        let right_partition = self.new_partition(right_area).await?;
-
-        Ok((left_partition, right_partition))
     }
 
     /// Launches a new app in an area of the screen.

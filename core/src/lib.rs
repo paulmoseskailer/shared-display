@@ -10,6 +10,7 @@
 //!
 //!
 #![no_std]
+#![warn(missing_docs)]
 #![allow(async_fn_in_trait)]
 #![feature(iter_advance_by)]
 

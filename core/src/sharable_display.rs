@@ -56,14 +56,18 @@ pub enum NewPartitionError {
 /// Events from other apps that allow to alter a partition.
 #[derive(Debug, PartialEq, Eq)]
 pub enum AppEvent {
+    /// Another app was closed
     AppClosed(Rectangle),
 }
 
 /// Things that might go wrong trying to envelope the area of an app that closed.
 #[derive(Debug, PartialEq, Eq)]
 pub enum EnvelopeError {
+    /// The passed in AppEvent was not an AppClosed event
     WrongEvent,
-    NotAligned,
+    /// Enveloping the adjacent app would not result in a proper rectangle
+    NotAdjacent,
+    /// An error occured checking the new partition size
     PartitioningError(NewPartitionError),
 }
 
@@ -178,7 +182,7 @@ where
             && (other.size.height == self.area.size.height);
 
         if !(extends_above_or_below || extends_left_or_right) {
-            return Err(EnvelopeError::NotAligned);
+            return Err(EnvelopeError::NotAdjacent);
         }
 
         self.area = self.area.envelope(&other);
