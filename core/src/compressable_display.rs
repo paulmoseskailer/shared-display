@@ -70,10 +70,10 @@ where
         area: Rectangle,
     ) -> Result<CompressedDisplayPartition<D>, NewPartitionError> {
         if area.size.width < 8 {
-            return Err(NewPartitionError::PartitionTooSmall);
+            return Err(NewPartitionError::TooSmall);
         }
         if area.size.width % 8 != 0 {
-            return Err(NewPartitionError::PartitionBadWidth);
+            return Err(NewPartitionError::BadWidth);
         }
 
         Ok(CompressedDisplayPartition {
