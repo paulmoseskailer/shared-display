@@ -8,8 +8,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::{
-    DisplaySidePartitioningError, SharableBufferedDisplay, compressed_buffer::*,
-    flush_lock::FlushLock,
+    NewPartitionError, SharableBufferedDisplay, compressed_buffer::*, flush_lock::FlushLock,
 };
 
 /// A [`SharableBufferedDisplay`] that can compressed.
@@ -69,12 +68,12 @@ where
     pub fn new(
         parent_size: Size,
         area: Rectangle,
-    ) -> Result<CompressedDisplayPartition<D>, DisplaySidePartitioningError> {
+    ) -> Result<CompressedDisplayPartition<D>, NewPartitionError> {
         if area.size.width < 8 {
-            return Err(DisplaySidePartitioningError::PartitionTooSmall);
+            return Err(NewPartitionError::PartitionTooSmall);
         }
         if area.size.width % 8 != 0 {
-            return Err(DisplaySidePartitioningError::PartitionBadWidth);
+            return Err(NewPartitionError::PartitionBadWidth);
         }
 
         Ok(CompressedDisplayPartition {

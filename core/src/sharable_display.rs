@@ -12,17 +12,6 @@ use embedded_graphics::{
 /// Maximum number of apps allowed on the screen concurrently.
 pub const MAX_APPS_PER_SCREEN: usize = 8;
 
-/// Error type for creating a partition.
-#[derive(Debug)]
-pub enum DisplaySidePartitioningError {
-    /// Cannot create partitions less than 8 pixels wide.
-    PartitionTooSmall,
-    /// A partition should have width divisible by 8.
-    PartitionBadWidth,
-    /// Display width must be divisible by both pixels as well as buffer elements.
-    BufferPixelMismatch,
-}
-
 /// A buffered [`DrawTarget`] that can be shared among multiple apps.
 pub trait SharableBufferedDisplay: DrawTarget {
     /// The type of elements saved to the buffer - may differ from [`DrawTarget::Color`].
@@ -42,21 +31,10 @@ pub trait SharableBufferedDisplay: DrawTarget {
         &mut self,
         area: Rectangle,
         draw_tracker: &'static DrawTracker,
-    ) -> Result<DisplayPartition<Self>, DisplaySidePartitioningError> {
-        if area.size.width < 8 {
-            return Err(DisplaySidePartitioningError::PartitionTooSmall);
-        }
-
+    ) -> Result<DisplayPartition<Self>, NewPartitionError> {
         let parent_size = self.bounding_box().size;
         let buffer_len = self.get_buffer().len();
-        let pixels_per_buffer_el = (parent_size.width * parent_size.height) as usize / buffer_len;
-        if pixels_per_buffer_el > 0 && parent_size.width % pixels_per_buffer_el as u32 != 0 {
-            return Err(DisplaySidePartitioningError::BufferPixelMismatch);
-        }
-
-        if area.size.width % 8 != 0 {
-            return Err(DisplaySidePartitioningError::PartitionBadWidth);
-        }
+        check_partition_ok(&area, parent_size, buffer_len)?;
 
         Ok(DisplayPartition::new(
             self.get_buffer(),
@@ -65,6 +43,42 @@ pub trait SharableBufferedDisplay: DrawTarget {
             draw_tracker,
         ))
     }
+}
+
+/// Error Type for creating new screen partitions.
+#[derive(Debug)]
+pub enum NewPartitionError {
+    /// Overlaps with existing partitions.
+    Overlaps,
+    /// Area outside the parent display.
+    OutsideParent,
+    /// Cannot create partitions less than 8 pixels wide.
+    PartitionTooSmall,
+    /// A partition should have width divisible by 8.
+    PartitionBadWidth,
+    /// Display width must be divisible by both pixels as well as buffer elements.
+    BufferPixelMismatch,
+}
+
+fn check_partition_ok(
+    area: &Rectangle,
+    parent_size: Size,
+    buffer_len: usize,
+) -> Result<(), NewPartitionError> {
+    if area.size.width < 8 {
+        return Err(NewPartitionError::PartitionTooSmall);
+    }
+
+    let pixels_per_buffer_el = (parent_size.width * parent_size.height) as usize / buffer_len;
+    if pixels_per_buffer_el > 0 && parent_size.width % pixels_per_buffer_el as u32 != 0 {
+        return Err(NewPartitionError::BufferPixelMismatch);
+    }
+
+    if area.size.width % 8 != 0 {
+        return Err(NewPartitionError::PartitionBadWidth);
+    }
+
+    Ok(())
 }
 
 /// A partition of a [`SharableBufferedDisplay`].
@@ -113,29 +127,18 @@ where
         }
     }
 
-    /// Splits the partition vertically into two new partitions.
-    pub fn split_vertically(
+    /// Splits the partition into two new partitions.
+    pub fn split_in_two(
         &mut self,
-    ) -> Result<(DisplayPartition<D>, DisplayPartition<D>), DisplaySidePartitioningError> {
-        let size = self.area.size;
-
-        // ensure no bytes are split in half by rounding to a split of width multiple of 8
-        let left_area_width = ((size.width / 2) + 7) & !7;
-        let left_area = Rectangle::new(self.area.top_left, Size::new(left_area_width, size.height));
-        let right_area = Rectangle::new(
-            self.area.top_left + Point::new(left_area_width.try_into().unwrap(), 0),
-            Size::new(size.width - left_area_width, size.height),
-        );
-
-        if left_area_width < 8 || size.width - left_area_width < 8 {
-            return Err(DisplaySidePartitioningError::PartitionTooSmall);
+        area1: Rectangle,
+        area2: Rectangle,
+    ) -> Result<(DisplayPartition<D>, DisplayPartition<D>), NewPartitionError> {
+        if area1.intersection(&area2).size != Size::zero() {
+            return Err(NewPartitionError::Overlaps);
         }
 
-        let pixels_per_buffer_el =
-            (self.parent_size.width * self.parent_size.height) as usize / self.buffer_len;
-        if pixels_per_buffer_el > 0 && self.parent_size.width % pixels_per_buffer_el as u32 != 0 {
-            return Err(DisplaySidePartitioningError::BufferPixelMismatch);
-        }
+        check_partition_ok(&area1, self.parent_size, self.buffer_len)?;
+        check_partition_ok(&area2, self.parent_size, self.buffer_len)?;
 
         Ok((
             DisplayPartition::new(
@@ -144,7 +147,7 @@ where
                     core::slice::from_raw_parts_mut(self.buffer, self.buffer_len)
                 },
                 self.parent_size,
-                left_area,
+                area1,
                 self.draw_tracker,
             ),
             DisplayPartition::new(
@@ -153,7 +156,7 @@ where
                     core::slice::from_raw_parts_mut(self.buffer, self.buffer_len)
                 },
                 self.parent_size,
-                right_area,
+                area2,
                 self.draw_tracker,
             ),
         ))
@@ -161,7 +164,7 @@ where
 
     /// Increase this partition's size.
     pub fn envelope(&mut self, other: &Rectangle) {
-        // TODO: do size checks and possibly return `DisplaySidePartitioningError`
+        // TODO: do size checks and possibly return `NewPartitionError`
         self.area = self.area.envelope(other);
     }
 

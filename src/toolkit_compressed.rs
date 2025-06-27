@@ -88,8 +88,7 @@ where
                 return Err(NewPartitionError::Overlaps);
             }
         }
-        let partition = CompressedDisplayPartition::new(self.size, area)
-            .map_err(NewPartitionError::DisplaySide)?;
+        let partition = CompressedDisplayPartition::new(self.size, area)?;
         self.buffer_pointers
             .push(partition.get_ptr_to_buffer())
             .unwrap();

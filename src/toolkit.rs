@@ -13,7 +13,7 @@ use embedded_graphics::{
 use static_cell::StaticCell;
 
 use shared_display_core::{
-    AreaToFlush, DisplayPartition, DisplaySidePartitioningError, DrawTracker, MAX_APPS_PER_SCREEN,
+    AreaToFlush, DisplayPartition, DrawTracker, MAX_APPS_PER_SCREEN, NewPartitionError,
     SharableBufferedDisplay,
 };
 
@@ -26,14 +26,6 @@ static DRAW_TRACKERS: [DrawTracker; MAX_APPS_PER_SCREEN] =
 pub const FLUSH_INTERVAL: Duration = Duration::from_millis(20);
 /// Event queue for all apps to access.
 pub static EVENTS: Channel<CriticalSectionRawMutex, AppEvent, EVENT_QUEUE_SIZE> = Channel::new();
-
-/// Error Type for creating new screen partitions.
-#[derive(Debug)]
-pub enum NewPartitionError {
-    Overlaps,
-    OutsideParent,
-    DisplaySide(DisplaySidePartitioningError),
-}
 
 /// Whether to continue flushing or not.
 #[derive(PartialEq, Eq)]
@@ -99,7 +91,7 @@ where
             self.partition_areas.push(area).unwrap();
         }
 
-        result.map_err(NewPartitionError::DisplaySide)
+        result
     }
 
     pub async fn partition_vertically(
