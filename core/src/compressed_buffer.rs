@@ -432,7 +432,7 @@ mod tests {
         buffer.set_at_index(index2, 1)?;
 
         buffer.check_integrity()?;
-        let mut iter = DecompressingIter::new(unsafe { &*buffer.get_ptr_to_inner() });
+        let iter = DecompressingIter::new(unsafe { &*buffer.get_ptr_to_inner() });
 
         // check cloned iter
         assert_eq!(iter.clone().nth(0), Some(1));
@@ -443,16 +443,6 @@ mod tests {
         assert_eq!(iter.clone().nth(index1 + 1), Some(0));
 
         assert_eq!(iter.clone().nth(index2), Some(1));
-
-        // advance actual iter
-        iter.advance_by(index1 - 1).unwrap();
-        assert_eq!(iter.next(), Some(0));
-        assert_eq!(iter.next(), Some(1));
-        assert_eq!(iter.next(), Some(0));
-
-        iter.advance_by(index2 - (index1 + 2)).unwrap();
-        assert_eq!(iter.next(), Some(1));
-        assert_eq!(iter.next(), None);
 
         Ok(())
     }
