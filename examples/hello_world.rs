@@ -44,8 +44,10 @@ async fn text_app(mut display: DisplayPartition<DisplayType>) -> () {
         .draw(&mut display)
         .await
         .unwrap();
+        display.request_flush();
         Timer::after_millis(500).await;
         display.clear(BinaryColor::Off).await.unwrap();
+        display.request_flush();
         Timer::after_millis(500).await;
     }
 }
@@ -79,8 +81,10 @@ async fn line_app(mut display: DisplayPartition<DisplayType>) -> () {
         .unwrap();
 
         // clear and loop
+        display.request_flush();
         Timer::after_millis(500).await;
         display.clear(BinaryColor::Off).await.unwrap();
+        display.request_flush();
         Timer::after_millis(500).await;
     }
 }
@@ -118,7 +122,7 @@ async fn main(spawner: Spawner) {
     Timer::after_millis(500).await;
 
     shared_display
-        .run_flush_loop_with(async |d, _area| {
+        .wait_for_flush_requests(async |d, _area| {
             window.update(d);
             if window.events().any(|e| e == SimulatorEvent::Quit) {
                 return FlushResult::Abort;

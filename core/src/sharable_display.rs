@@ -1,5 +1,5 @@
 use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
 use embedded_graphics::prelude::{ContainsPoint, PointsIter};
 use embedded_graphics::{
     Pixel,
@@ -31,10 +31,17 @@ pub trait SharableBufferedDisplay: DrawTarget {
         &mut self,
         area: Rectangle,
         draw_tracker: &'static DrawTracker,
+        flush_request_signal: &'static Signal<CriticalSectionRawMutex, ()>,
     ) -> Result<DisplayPartition<Self>, NewPartitionError> {
         let parent_size = self.bounding_box().size;
 
-        DisplayPartition::new(self.get_buffer(), parent_size, area, draw_tracker)
+        DisplayPartition::new(
+            self.get_buffer(),
+            parent_size,
+            area,
+            draw_tracker,
+            flush_request_signal,
+        )
     }
 }
 
@@ -84,6 +91,7 @@ pub struct DisplayPartition<D: SharableBufferedDisplay + ?Sized> {
 
     _display: core::marker::PhantomData<D>,
     draw_tracker: &'static DrawTracker,
+    flush_request_signal: &'static Signal<CriticalSectionRawMutex, ()>,
 }
 
 impl<C, B, D> DisplayPartition<D>
@@ -122,6 +130,7 @@ where
         parent_size: Size,
         area: Rectangle,
         draw_tracker: &'static DrawTracker,
+        flush_request_signal: &'static Signal<CriticalSectionRawMutex, ()>,
     ) -> Result<DisplayPartition<D>, NewPartitionError> {
         let buffer_len = buffer.len();
         Self::check_partition_ok(&area, parent_size, buffer_len)?;
@@ -133,7 +142,13 @@ where
             area,
             _display: core::marker::PhantomData,
             draw_tracker,
+            flush_request_signal,
         })
+    }
+
+    /// Request to flush this partition.
+    pub fn request_flush(&mut self) {
+        self.flush_request_signal.signal(());
     }
 
     /// Splits the partition into two new partitions.
@@ -155,6 +170,7 @@ where
                 self.parent_size,
                 area1,
                 self.draw_tracker,
+                self.flush_request_signal,
             )?,
             DisplayPartition::new(
                 unsafe {
@@ -164,6 +180,7 @@ where
                 self.parent_size,
                 area2,
                 self.draw_tracker,
+                self.flush_request_signal,
             )?,
         ))
     }

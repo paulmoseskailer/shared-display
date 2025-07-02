@@ -4,7 +4,9 @@ use alloc::boxed::Box;
 
 use ::core::{future::Future, pin::Pin};
 use embassy_executor::Spawner;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex, signal::Signal,
+};
 use embassy_time::{Duration, Timer};
 use embedded_graphics::{geometry::Size, primitives::Rectangle};
 use static_cell::StaticCell;
@@ -23,6 +25,9 @@ static DRAW_TRACKERS: [DrawTracker; MAX_APPS_PER_SCREEN] =
 pub const FLUSH_INTERVAL: Duration = Duration::from_millis(20);
 /// Event queue for all apps to access.
 pub static EVENTS: Channel<CriticalSectionRawMutex, AppEvent, EVENT_QUEUE_SIZE> = Channel::new();
+/// Signals for partitions to request flushing
+static FLUSH_REQUESTS: [Signal<CriticalSectionRawMutex, ()>; MAX_APPS_PER_SCREEN] =
+    [const { Signal::new() }; MAX_APPS_PER_SCREEN];
 
 /// Whether to continue flushing or not.
 #[derive(PartialEq, Eq)]
@@ -80,7 +85,8 @@ where
         }
 
         let index = self.partition_areas.len();
-        let result = real_display.new_partition(area, &self.draw_trackers[index]);
+        let result =
+            real_display.new_partition(area, &self.draw_trackers[index], &FLUSH_REQUESTS[index]);
 
         if result.is_ok() {
             self.partition_areas.push(area).unwrap();
@@ -155,6 +161,28 @@ where
                     flush_area_fn(&mut *self.real_display.lock().await, area_to_flush).await;
                 if flush_result == FlushResult::Abort {
                     break 'outer;
+                }
+            }
+            Timer::after(FLUSH_INTERVAL).await;
+        }
+    }
+
+    /// Spawns a background task that waits for flush requests from [`DisplayPartition`]s and flushes
+    pub async fn wait_for_flush_requests<F>(&self, mut flush_area_fn: F)
+    where
+        F: AsyncFnMut(&mut D, Rectangle) -> FlushResult,
+    {
+        loop {
+            for (i, signal) in FLUSH_REQUESTS.iter().enumerate() {
+                if let Some(_) = signal.try_take() {
+                    let flush_result = flush_area_fn(
+                        &mut *self.real_display.lock().await,
+                        self.partition_areas[i],
+                    )
+                    .await;
+                    if flush_result == FlushResult::Abort {
+                        break;
+                    }
                 }
             }
             Timer::after(FLUSH_INTERVAL).await;
