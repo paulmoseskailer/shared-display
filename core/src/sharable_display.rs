@@ -260,9 +260,19 @@ where
     where
         I: IntoIterator<Item = Self::Color>,
     {
-        self.draw_tracker.dirty_area.lock().await.include(area);
+        let drawable_area = area.intersection(&Rectangle::new_at_origin(self.area.size));
+        if drawable_area.is_zero_sized() {
+            // area outside partition, noop
+            return Ok(());
+        }
+        self.draw_tracker
+            .dirty_area
+            .lock()
+            .await
+            .include(&drawable_area);
         self.draw_iter_internal(
-            area.points()
+            drawable_area
+                .points()
                 .zip(colors)
                 .map(|(pos, color)| Pixel(pos, color)),
             false,
