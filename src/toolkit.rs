@@ -144,15 +144,17 @@ where
         'outer: loop {
             for (index, draw_tracker) in self.draw_trackers.iter().enumerate() {
                 let area_to_flush = match draw_tracker.take_dirty_area().await {
-                    AreaToFlush::None => None,
-                    AreaToFlush::All => Some(self.partition_areas[index]),
-                    AreaToFlush::Some(rect) => Some(rect),
-                };
-                if let Some(rect) = area_to_flush {
-                    let result = flush_area_fn(&mut *self.real_display.lock().await, rect).await;
-                    if result == FlushResult::Abort {
-                        break 'outer;
+                    AreaToFlush::None => continue,
+                    AreaToFlush::All => self.partition_areas[index],
+                    AreaToFlush::Some(rect) => {
+                        let offset = self.partition_areas[index].top_left;
+                        Rectangle::new(rect.top_left + offset, rect.size)
                     }
+                };
+                let flush_result =
+                    flush_area_fn(&mut *self.real_display.lock().await, area_to_flush).await;
+                if flush_result == FlushResult::Abort {
+                    break 'outer;
                 }
             }
             Timer::after(FLUSH_INTERVAL).await;
