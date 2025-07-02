@@ -21,8 +21,6 @@ pub(crate) static SPAWNER: StaticCell<Spawner> = StaticCell::new();
 static DRAW_TRACKERS: [DrawTracker; MAX_APPS_PER_SCREEN] =
     [const { DrawTracker::new() }; MAX_APPS_PER_SCREEN];
 
-/// Interval between to flushes.
-pub const FLUSH_INTERVAL: Duration = Duration::from_millis(20);
 /// Event queue for all apps to access.
 pub static EVENTS: Channel<CriticalSectionRawMutex, AppEvent, EVENT_QUEUE_SIZE> = Channel::new();
 /// Signals for partitions to request flushing
@@ -143,7 +141,7 @@ where
     /// Provides the passed in function with a Rectangle of the area that has been drawn to since
     /// the last flush.
     /// Only exits if the flush function returns [`FlushResult::Abort`].
-    pub async fn run_flush_loop_with<F>(&self, mut flush_area_fn: F)
+    pub async fn run_flush_loop_with<F>(&self, mut flush_area_fn: F, flush_interval: Duration)
     where
         F: AsyncFnMut(&mut D, Rectangle) -> FlushResult,
     {
@@ -163,12 +161,12 @@ where
                     break 'outer;
                 }
             }
-            Timer::after(FLUSH_INTERVAL).await;
+            Timer::after(flush_interval).await;
         }
     }
 
-    /// Spawns a background task that waits for flush requests from [`DisplayPartition`]s and flushes
-    pub async fn wait_for_flush_requests<F>(&self, mut flush_area_fn: F)
+    /// Spawns a background task that waits for flush requests from all [`DisplayPartition`]s and flushes.
+    pub async fn wait_for_flush_requests<F>(&self, mut flush_area_fn: F, request_interval: Duration)
     where
         F: AsyncFnMut(&mut D, Rectangle) -> FlushResult,
     {
@@ -185,7 +183,7 @@ where
                     }
                 }
             }
-            Timer::after(FLUSH_INTERVAL).await;
+            Timer::after(request_interval).await;
         }
     }
 }

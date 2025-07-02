@@ -194,14 +194,20 @@ async fn main(spawner: Spawner) {
 
     #[cfg(feature = "compressed")]
     shared_display
-        .run_flush_loop_with_completion(async |_display| FlushResult::Continue)
+        .run_flush_loop_with_completion(
+            async |_display| FlushResult::Continue,
+            Duration::from_millis(20),
+        )
         .await;
 
     #[cfg(not(feature = "compressed"))]
     shared_display
-        .run_flush_loop_with(async |display, area| {
-            display.flush_area(&area).await;
-            FlushResult::Continue
-        })
+        .run_flush_loop_with(
+            async |display, area| {
+                display.flush_area(&area).await;
+                FlushResult::Continue
+            },
+            Duration::from_millis(20),
+        )
         .await;
 }
