@@ -140,10 +140,7 @@ where
         match self.draw_trackers[partition].take_dirty_area().await {
             AreaToFlush::None => None,
             AreaToFlush::All => Some(self.partition_areas[partition]),
-            AreaToFlush::Some(rect) => {
-                let offset = self.partition_areas[partition].top_left;
-                Some(Rectangle::new(rect.top_left + offset, rect.size))
-            }
+            AreaToFlush::Some(rect) => Some(rect),
         }
     }
 
@@ -178,7 +175,7 @@ where
     {
         'flush: loop {
             for (partition, signal) in FLUSH_REQUESTS.iter().enumerate() {
-                if let Some(_) = signal.try_take() {
+                if signal.try_take().is_some() {
                     let Some(area_to_flush) = self.get_dirty_area_of_partition(partition).await
                     else {
                         continue;

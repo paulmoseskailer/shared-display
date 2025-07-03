@@ -219,22 +219,31 @@ where
         let whole_buffer: &mut [B] =
             // Safety: we check that every index is within our owned slice
             unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) };
-        let mut has_drawn = false;
-        pixels
+        for p in pixels
             .into_iter()
             .map(|pixel| Pixel(pixel.0 + self.area.top_left, pixel.1))
             .filter(|Pixel(pos, _color)| self.contains(*pos))
-            .for_each(|p| {
-                let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
-                if self.contains(p.0) {
-                    whole_buffer[buffer_index] = D::map_to_buffer_element(p.1);
-                    has_drawn = true;
+        {
+            let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
+            if self.contains(p.0) {
+                whole_buffer[buffer_index] = D::map_to_buffer_element(p.1);
+                if update_dirty_area {
+                    self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
+                    {
+                        let mut guard = self.draw_tracker.dirty_area.lock().await;
+                        match *guard {
+                            AreaToFlush::All => {}
+                            AreaToFlush::None => {
+                                *guard = AreaToFlush::Some(Rectangle::new(p.0, Size::new_equal(1)));
+                            }
+                            AreaToFlush::Some(rect) => {
+                                let new_rect =
+                                    rect.envelope(&Rectangle::new(p.0, Size::new_equal(1)));
+                                *guard = AreaToFlush::Some(new_rect);
+                            }
+                        }
+                    }
                 }
-            });
-        if has_drawn {
-            self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
-            if update_dirty_area {
-                *self.draw_tracker.dirty_area.lock().await = AreaToFlush::All;
             }
         }
         Ok(())
@@ -300,6 +309,7 @@ where
     // Make sure to remove the offset from the Rectangle to be cleared,
     // draw_iter adds it again
     async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
         *self.draw_tracker.dirty_area.lock().await = AreaToFlush::All;
 
         self.fill_solid(&(Rectangle::new(Point::new(0, 0), self.area.size)), color)
