@@ -136,6 +136,17 @@ where
         Ok(())
     }
 
+    async fn get_dirty_area_of_partition(&self, partition: usize) -> Option<Rectangle> {
+        match self.draw_trackers[partition].take_dirty_area().await {
+            AreaToFlush::None => None,
+            AreaToFlush::All => Some(self.partition_areas[partition]),
+            AreaToFlush::Some(rect) => {
+                let offset = self.partition_areas[partition].top_left;
+                Some(Rectangle::new(rect.top_left + offset, rect.size))
+            }
+        }
+    }
+
     /// Runs a given flush function in a loop.
     ///
     /// Provides the passed in function with a Rectangle of the area that has been drawn to since
@@ -146,14 +157,9 @@ where
         F: AsyncFnMut(&mut D, Rectangle) -> FlushResult,
     {
         'outer: loop {
-            for (index, draw_tracker) in self.draw_trackers.iter().enumerate() {
-                let area_to_flush = match draw_tracker.take_dirty_area().await {
-                    AreaToFlush::None => continue,
-                    AreaToFlush::All => self.partition_areas[index],
-                    AreaToFlush::Some(rect) => {
-                        let offset = self.partition_areas[index].top_left;
-                        Rectangle::new(rect.top_left + offset, rect.size)
-                    }
+            for partition in 0..self.partition_areas.len() {
+                let Some(area_to_flush) = self.get_dirty_area_of_partition(partition).await else {
+                    continue;
                 };
                 let flush_result =
                     flush_area_fn(&mut *self.real_display.lock().await, area_to_flush).await;
@@ -170,16 +176,17 @@ where
     where
         F: AsyncFnMut(&mut D, Rectangle) -> FlushResult,
     {
-        loop {
-            for (i, signal) in FLUSH_REQUESTS.iter().enumerate() {
+        'flush: loop {
+            for (partition, signal) in FLUSH_REQUESTS.iter().enumerate() {
                 if let Some(_) = signal.try_take() {
-                    let flush_result = flush_area_fn(
-                        &mut *self.real_display.lock().await,
-                        self.partition_areas[i],
-                    )
-                    .await;
+                    let Some(area_to_flush) = self.get_dirty_area_of_partition(partition).await
+                    else {
+                        continue;
+                    };
+                    let flush_result =
+                        flush_area_fn(&mut *self.real_display.lock().await, area_to_flush).await;
                     if flush_result == FlushResult::Abort {
-                        break;
+                        break 'flush;
                     }
                 }
             }
