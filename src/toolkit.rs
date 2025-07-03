@@ -12,14 +12,11 @@ use embedded_graphics::{geometry::Size, primitives::Rectangle};
 use static_cell::StaticCell;
 
 use shared_display_core::{
-    AppEvent, DisplayPartition, DrawTracker, MAX_APPS_PER_SCREEN, NewPartitionError,
-    SharableBufferedDisplay,
+    AppEvent, DisplayPartition, MAX_APPS_PER_SCREEN, NewPartitionError, SharableBufferedDisplay,
 };
 
 const EVENT_QUEUE_SIZE: usize = MAX_APPS_PER_SCREEN;
 pub(crate) static SPAWNER: StaticCell<Spawner> = StaticCell::new();
-static DRAW_TRACKERS: [DrawTracker; MAX_APPS_PER_SCREEN] =
-    [const { DrawTracker::new() }; MAX_APPS_PER_SCREEN];
 
 /// Event queue for all apps to access.
 pub static EVENTS: Channel<CriticalSectionRawMutex, AppEvent, EVENT_QUEUE_SIZE> = Channel::new();
@@ -41,7 +38,6 @@ pub struct SharedDisplay<D: SharableBufferedDisplay> {
     /// The actual display, locked with mutex
     pub real_display: Mutex<CriticalSectionRawMutex, D>,
     partition_areas: heapless::Vec<Rectangle, MAX_APPS_PER_SCREEN>,
-    draw_trackers: &'static [DrawTracker; MAX_APPS_PER_SCREEN],
 
     spawner: &'static Spawner,
 }
@@ -56,7 +52,6 @@ where
         SharedDisplay {
             real_display: Mutex::new(real_display),
             partition_areas: heapless::Vec::new(),
-            draw_trackers: &DRAW_TRACKERS,
             spawner: spawner_ref,
         }
     }
@@ -83,8 +78,7 @@ where
         }
 
         let index = self.partition_areas.len();
-        let result =
-            real_display.new_partition(area, &self.draw_trackers[index], &FLUSH_REQUESTS[index]);
+        let result = real_display.new_partition(area, &FLUSH_REQUESTS[index]);
 
         if result.is_ok() {
             self.partition_areas.push(area).unwrap();
@@ -137,10 +131,7 @@ where
     }
 
     async fn get_dirty_area_of_partition(&self, partition: usize) -> Option<Rectangle> {
-        match self.draw_trackers[partition].is_dirty() {
-            false => None,
-            true => Some(self.partition_areas[partition]),
-        }
+        Some(self.partition_areas[partition])
     }
 
     /// Runs a given flush function in a loop.
