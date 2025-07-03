@@ -4,9 +4,7 @@ use alloc::boxed::Box;
 
 use ::core::{future::Future, pin::Pin};
 use embassy_executor::Spawner;
-use embassy_sync::{
-    blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex, signal::Signal,
-};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
 use embassy_time::{Duration, Timer};
 use embedded_graphics::{geometry::Size, primitives::Rectangle};
 use static_cell::StaticCell;
@@ -20,9 +18,9 @@ pub(crate) static SPAWNER: StaticCell<Spawner> = StaticCell::new();
 
 /// Event queue for all apps to access.
 pub static EVENTS: Channel<CriticalSectionRawMutex, AppEvent, EVENT_QUEUE_SIZE> = Channel::new();
-/// Signals for partitions to request flushing
-static FLUSH_REQUESTS: [Signal<CriticalSectionRawMutex, ()>; MAX_APPS_PER_SCREEN] =
-    [const { Signal::new() }; MAX_APPS_PER_SCREEN];
+
+/// Channel for partitions to request flushing.
+static FLUSH_REQUESTS: Channel<CriticalSectionRawMutex, u8, MAX_APPS_PER_SCREEN> = Channel::new();
 
 /// Whether to continue flushing or not.
 #[derive(PartialEq, Eq)]
@@ -78,7 +76,7 @@ where
         }
 
         let index = self.partition_areas.len();
-        let result = real_display.new_partition(area, &FLUSH_REQUESTS[index]);
+        let result = real_display.new_partition(index.try_into().unwrap(), area, &FLUSH_REQUESTS);
 
         if result.is_ok() {
             self.partition_areas.push(area).unwrap();
@@ -130,10 +128,6 @@ where
         Ok(())
     }
 
-    async fn get_dirty_area_of_partition(&self, partition: usize) -> Option<Rectangle> {
-        Some(self.partition_areas[partition])
-    }
-
     /// Runs a given flush function in a loop.
     ///
     /// Provides the passed in function with a Rectangle of the area that has been drawn to since
@@ -143,15 +137,13 @@ where
     where
         F: AsyncFnMut(&mut D, Rectangle) -> FlushResult,
     {
-        'outer: loop {
+        'flush: loop {
             for partition in 0..self.partition_areas.len() {
-                let Some(area_to_flush) = self.get_dirty_area_of_partition(partition).await else {
-                    continue;
-                };
+                let area_to_flush = self.partition_areas[partition];
                 let flush_result =
                     flush_area_fn(&mut *self.real_display.lock().await, area_to_flush).await;
                 if flush_result == FlushResult::Abort {
-                    break 'outer;
+                    break 'flush;
                 }
             }
             Timer::after(flush_interval).await;
@@ -159,25 +151,20 @@ where
     }
 
     /// Spawns a background task that waits for flush requests from all [`DisplayPartition`]s and flushes.
-    pub async fn wait_for_flush_requests<F>(&self, mut flush_area_fn: F, request_interval: Duration)
+    pub async fn wait_for_flush_requests<F>(&self, mut flush_area_fn: F, retry_interval: Duration)
     where
         F: AsyncFnMut(&mut D, Rectangle) -> FlushResult,
     {
         'flush: loop {
-            for (partition, signal) in FLUSH_REQUESTS.iter().enumerate() {
-                if signal.try_take().is_some() {
-                    let Some(area_to_flush) = self.get_dirty_area_of_partition(partition).await
-                    else {
-                        continue;
-                    };
-                    let flush_result =
-                        flush_area_fn(&mut *self.real_display.lock().await, area_to_flush).await;
-                    if flush_result == FlushResult::Abort {
-                        break 'flush;
-                    }
+            while let Ok(partition) = FLUSH_REQUESTS.try_receive() {
+                let area_to_flush = self.partition_areas[partition as usize];
+                let flush_result =
+                    flush_area_fn(&mut *self.real_display.lock().await, area_to_flush).await;
+                if flush_result == FlushResult::Abort {
+                    break 'flush;
                 }
             }
-            Timer::after(request_interval).await;
+            Timer::after(Duration::from_millis(10) + retry_interval).await;
         }
     }
 }

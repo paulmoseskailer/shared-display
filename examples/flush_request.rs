@@ -44,10 +44,10 @@ async fn text_app(mut display: DisplayPartition<DisplayType>) -> () {
         .draw(&mut display)
         .await
         .unwrap();
-        display.request_flush();
+        display.request_flush().await;
         Timer::after_millis(500).await;
         display.clear(BinaryColor::Off).await.unwrap();
-        display.request_flush();
+        display.request_flush().await;
         Timer::after_millis(500).await;
     }
 }
@@ -81,10 +81,10 @@ async fn line_app(mut display: DisplayPartition<DisplayType>) -> () {
         .unwrap();
 
         // clear and loop
-        display.request_flush();
+        display.request_flush().await;
         Timer::after_millis(500).await;
         display.clear(BinaryColor::Off).await.unwrap();
-        display.request_flush();
+        display.request_flush().await;
         Timer::after_millis(500).await;
     }
 }

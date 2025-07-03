@@ -1,4 +1,5 @@
 use core::convert::Infallible;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use embedded_graphics::{
     Pixel,
     draw_target::DrawTarget,
@@ -7,15 +8,14 @@ use embedded_graphics::{
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
 };
-use shared_display_core::{DrawTracker, NewPartitionError, SharableBufferedDisplay};
+use shared_display_core::{MAX_APPS_PER_SCREEN, NewPartitionError, SharableBufferedDisplay};
 
 const DISP_WIDTH: usize = 16;
 const DISP_HEIGHT: usize = 2;
 const NUM_PIXELS: usize = DISP_WIDTH * DISP_HEIGHT;
 
 const PRINT_FLUSH: bool = false;
-
-static DRAW_TRACKERS: [DrawTracker; 2] = [DrawTracker::new(), DrawTracker::new()];
+static FLUSH_REQUESTS: Channel<CriticalSectionRawMutex, u8, MAX_APPS_PER_SCREEN> = Channel::new();
 
 struct FakeDisplay {
     buffer: [u8; NUM_PIXELS],
@@ -94,9 +94,9 @@ async fn simple_split_clear() -> Result<(), NewPartitionError> {
     assert_eq!(*d.flush(), [1; NUM_PIXELS]);
 
     let left_area = Rectangle::new(Point::new(0, 0), Size::new(8, 2));
-    let mut left_display = d.new_partition(left_area, &DRAW_TRACKERS[0]).unwrap();
+    let mut left_display = d.new_partition(0, left_area, &FLUSH_REQUESTS).unwrap();
     let right_area = Rectangle::new(Point::new(8, 0), Size::new(8, 2));
-    let mut right_display = d.new_partition(right_area, &DRAW_TRACKERS[1]).unwrap();
+    let mut right_display = d.new_partition(1, right_area, &FLUSH_REQUESTS).unwrap();
 
     left_display.clear(BinaryColor::Off).await.unwrap();
     let expected = string_to_buffer(String::from("00000000 11111111 00000000 11111111"));
@@ -119,9 +119,9 @@ async fn simple_split_draw_iter() -> Result<(), NewPartitionError> {
     assert_eq!(*d.flush(), [0; NUM_PIXELS]);
 
     let left_area = Rectangle::new(Point::new(0, 0), Size::new(8, 2));
-    let mut left_display = d.new_partition(left_area, &DRAW_TRACKERS[0])?;
+    let mut left_display = d.new_partition(0, left_area, &FLUSH_REQUESTS)?;
     let right_area = Rectangle::new(Point::new(8, 0), Size::new(8, 2));
-    let mut right_display = d.new_partition(right_area, &DRAW_TRACKERS[1])?;
+    let mut right_display = d.new_partition(1, right_area, &FLUSH_REQUESTS)?;
 
     let rect = Rectangle::new(Point::new(0, 0), Size::new(2, 2));
     rect.into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
