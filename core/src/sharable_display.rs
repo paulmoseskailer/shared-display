@@ -1,5 +1,5 @@
 use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embedded_graphics::prelude::{ContainsPoint, PointsIter};
 use embedded_graphics::{
     Pixel,
@@ -219,6 +219,7 @@ where
         let whole_buffer: &mut [B] =
             // Safety: we check that every index is within our owned slice
             unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) };
+        let mut has_drawn = false;
         for p in pixels
             .into_iter()
             .map(|pixel| Pixel(pixel.0 + self.area.top_left, pixel.1))
@@ -227,24 +228,13 @@ where
             let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
             if self.contains(p.0) {
                 whole_buffer[buffer_index] = D::map_to_buffer_element(p.1);
-                if update_dirty_area {
-                    self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
-                    {
-                        let mut guard = self.draw_tracker.dirty_area.lock().await;
-                        match *guard {
-                            AreaToFlush::All => {}
-                            AreaToFlush::None => {
-                                *guard = AreaToFlush::Some(Rectangle::new(p.0, Size::new_equal(1)));
-                            }
-                            AreaToFlush::Some(rect) => {
-                                let new_rect =
-                                    rect.envelope(&Rectangle::new(p.0, Size::new_equal(1)));
-                                *guard = AreaToFlush::Some(new_rect);
-                            }
-                        }
-                    }
+                if update_dirty_area && !has_drawn {
+                    has_drawn = true;
                 }
             }
+        }
+        if has_drawn {
+            self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
         }
         Ok(())
     }
@@ -291,11 +281,7 @@ where
             // area outside partition, noop
             return Ok(());
         }
-        self.draw_tracker
-            .dirty_area
-            .lock()
-            .await
-            .include(&drawable_area);
+        self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
         self.draw_iter_internal(
             drawable_area
                 .points()
@@ -310,7 +296,6 @@ where
     // draw_iter adds it again
     async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
-        *self.draw_tracker.dirty_area.lock().await = AreaToFlush::All;
 
         self.fill_solid(&(Rectangle::new(Point::new(0, 0), self.area.size)), color)
             .await
@@ -345,8 +330,6 @@ impl AreaToFlush {
 /// and write concurrently.
 pub struct DrawTracker {
     is_dirty: AtomicBool,
-    /// The area that has been drawn to, protected by a mutex.
-    pub dirty_area: Mutex<CriticalSectionRawMutex, AreaToFlush>,
 }
 
 impl Default for DrawTracker {
@@ -360,21 +343,12 @@ impl DrawTracker {
     pub const fn new() -> Self {
         Self {
             is_dirty: AtomicBool::new(false),
-            dirty_area: Mutex::new(AreaToFlush::None),
         }
     }
 
-    /// Returns the area that has been drawn to safely.
-    pub async fn take_dirty_area(&self) -> AreaToFlush {
-        if self.is_dirty.load(Ordering::Acquire) {
-            let mut guard = self.dirty_area.lock().await;
-            let area = guard.clone();
-            *guard = AreaToFlush::None;
-            self.is_dirty.store(false, Ordering::Release);
-            area
-        } else {
-            AreaToFlush::None
-        }
+    /// Whether the partition has been drawn to.
+    pub fn is_dirty(&self) -> bool {
+        self.is_dirty.load(Ordering::Relaxed)
     }
 }
 

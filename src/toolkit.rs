@@ -12,7 +12,7 @@ use embedded_graphics::{geometry::Size, primitives::Rectangle};
 use static_cell::StaticCell;
 
 use shared_display_core::{
-    AppEvent, AreaToFlush, DisplayPartition, DrawTracker, MAX_APPS_PER_SCREEN, NewPartitionError,
+    AppEvent, DisplayPartition, DrawTracker, MAX_APPS_PER_SCREEN, NewPartitionError,
     SharableBufferedDisplay,
 };
 
@@ -137,10 +137,9 @@ where
     }
 
     async fn get_dirty_area_of_partition(&self, partition: usize) -> Option<Rectangle> {
-        match self.draw_trackers[partition].take_dirty_area().await {
-            AreaToFlush::None => None,
-            AreaToFlush::All => Some(self.partition_areas[partition]),
-            AreaToFlush::Some(rect) => Some(rect),
+        match self.draw_trackers[partition].is_dirty() {
+            false => None,
+            true => Some(self.partition_areas[partition]),
         }
     }
 
