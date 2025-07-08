@@ -50,10 +50,11 @@ impl<const CHUNK_HEIGHT: usize, D: CompressableDisplay> ContainsPoint
 
 impl<const CHUNK_HEIGHT: usize, B, D> SharedCompressedDisplay<CHUNK_HEIGHT, D>
 where
+    B: Copy + Default + PartialEq,
     D: CompressableDisplay<BufferElement = B>,
 {
     /// Creates a new Shared Compressed Display from a real display.
-    pub fn new(mut real_display: D, spawner: Spawner) -> Self {
+    pub fn new(real_display: D, spawner: Spawner) -> Self {
         let spawner_ref: &'static Spawner = SPAWNER.init(spawner);
         let size = real_display.bounding_box().size;
         assert_eq!(
@@ -61,7 +62,6 @@ where
             0,
             "chosen CHUNK_HEIGHT needs to divide screen height"
         );
-        real_display.drop_buffer();
         SharedCompressedDisplay {
             real_display: Mutex::new(real_display),
             size,

@@ -7,28 +7,25 @@ use embedded_graphics::{
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::{
-    NewPartitionError, SharableBufferedDisplay, compressed_buffer::*, flush_lock::FlushLock,
-};
+use crate::{NewPartitionError, compressed_buffer::*, flush_lock::FlushLock};
 
-/// A [`SharableBufferedDisplay`] that can compressed.
-pub trait CompressableDisplay:
-    SharableBufferedDisplay<BufferElement: Copy + PartialEq + Default>
-{
+/// A buffered [`DrawTarget`] that can be compressed and shared among multiple apps.
+pub trait CompressableDisplay: DrawTarget {
+    /// The type of elements saved to the buffer - may differ from [`DrawTarget::Color`].
+    type BufferElement: Copy + PartialEq + Default;
+
+    /// Specify how `Color` maps to  `BufferElement`.
+    fn map_to_buffer_element(color: Self::Color) -> Self::BufferElement;
+
+    /// Calculate the buffer position of a [`Point`].
+    fn calculate_buffer_index(point: Point, buffer_area_size: Size) -> usize;
+
     /// Flushes a given chunk. Called once per chunk for every flush.
     async fn flush_chunk(&mut self, chunk: Vec<Self::BufferElement>, chunk_area: Rectangle);
-
-    /// Drops the original buffer if one exists. [`CompressedDisplayPartition`]s assign their
-    /// own buffers.
-    // TODO: reduce buffer to chunk size instead
-    fn drop_buffer(&mut self);
 }
 
 /// A partition of a [`CompressableDisplay`].
-pub struct CompressedDisplayPartition<D: SharableBufferedDisplay + ?Sized>
-where
-    D::BufferElement: core::cmp::PartialEq + Copy,
-{
+pub struct CompressedDisplayPartition<D: CompressableDisplay> {
     buffer: CompressedBuffer<D::BufferElement>,
     /// Size of the parent display.
     pub parent_size: Size,
@@ -38,31 +35,22 @@ where
     _display: core::marker::PhantomData<D>,
 }
 
-impl<C, B, D> ContainsPoint for CompressedDisplayPartition<D>
-where
-    B: Copy + core::cmp::PartialEq,
-    D: CompressableDisplay<BufferElement = B, Color = C> + ?Sized,
-{
+impl<D: CompressableDisplay> ContainsPoint for CompressedDisplayPartition<D> {
     fn contains(&self, p: Point) -> bool {
         self.area.contains(p)
     }
 }
 
-impl<C, B, D> Dimensions for CompressedDisplayPartition<D>
-where
-    B: Copy + core::cmp::PartialEq,
-    D: CompressableDisplay<BufferElement = B, Color = C> + ?Sized,
-{
+impl<D: CompressableDisplay> Dimensions for CompressedDisplayPartition<D> {
     fn bounding_box(&self) -> Rectangle {
         self.area
     }
 }
 
-impl<C, B, D> CompressedDisplayPartition<D>
+impl<B, D> CompressedDisplayPartition<D>
 where
-    C: PixelColor,
-    B: Copy + core::cmp::PartialEq,
-    D: CompressableDisplay<BufferElement = B, Color = C> + ?Sized,
+    B: Default + Copy + PartialEq,
+    D: CompressableDisplay<BufferElement = B>,
 {
     /// Creates a new partition.
     pub fn new(
@@ -98,8 +86,8 @@ where
 
 impl<B, D> DrawTarget for CompressedDisplayPartition<D>
 where
-    B: Copy + core::cmp::PartialEq,
     D: CompressableDisplay<BufferElement = B>,
+    B: Copy + PartialEq,
 {
     type Color = D::Color;
     type Error = D::Error;

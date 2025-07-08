@@ -283,7 +283,10 @@ pub struct DecompressingIter<'a, B: Copy + PartialEq + Default> {
     decompressed_index: usize,
 }
 
-impl<'a, B: Copy + PartialEq + Default> DecompressingIter<'a, B> {
+impl<'a, B> DecompressingIter<'a, B>
+where
+    B: Copy + PartialEq + Default,
+{
     /// Creates a new decompressing iterator from a vector of runs.
     pub fn new(buffer: &'a Vec<(B, u8)>) -> Self {
         let mut compressed_buffer_iter = buffer.iter();
