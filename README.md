@@ -2,7 +2,7 @@
 
 Enabling concurrent screen-sharing applications with embedded Rust.
 
-Extends [`embedded-graphics`](https://github.com/embedded-graphics/embedded-graphics) to provide easy development of concurrent, async screen-sharing applications for any display type.
+Extends [`embedded-graphics`](https://github.com/embedded-graphics/embedded-graphics) to provide easy development of concurrent, async screen-sharing applications for any display.
 Also includes an option for [integrated framebuffer compression](#integrated-framebuffer-compression).
 
 ## How to Run
