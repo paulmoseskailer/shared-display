@@ -1,5 +1,4 @@
-use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use embedded_graphics::prelude::{ContainsPoint, PointsIter};
 use embedded_graphics::{
     Pixel,
@@ -29,12 +28,19 @@ pub trait SharableBufferedDisplay: DrawTarget {
     /// Return a new [`DisplayPartition`] of the display.
     fn new_partition(
         &mut self,
+        id: u8,
         area: Rectangle,
-        draw_tracker: &'static DrawTracker,
+        flush_request_channel: &'static Channel<CriticalSectionRawMutex, u8, MAX_APPS_PER_SCREEN>,
     ) -> Result<DisplayPartition<Self>, NewPartitionError> {
         let parent_size = self.bounding_box().size;
 
-        DisplayPartition::new(self.get_buffer(), parent_size, area, draw_tracker)
+        DisplayPartition::new(
+            id,
+            self.get_buffer(),
+            parent_size,
+            area,
+            flush_request_channel,
+        )
     }
 }
 
@@ -73,6 +79,7 @@ pub enum EnvelopeError {
 
 /// A partition of a [`SharableBufferedDisplay`].
 pub struct DisplayPartition<D: SharableBufferedDisplay + ?Sized> {
+    id: u8,
     /// Mutable access to the entire display's buffer.
     pub buffer: *mut D::BufferElement,
     buffer_len: usize,
@@ -83,7 +90,7 @@ pub struct DisplayPartition<D: SharableBufferedDisplay + ?Sized> {
     pub area: Rectangle,
 
     _display: core::marker::PhantomData<D>,
-    draw_tracker: &'static DrawTracker,
+    flush_request_channel: &'static Channel<CriticalSectionRawMutex, u8, MAX_APPS_PER_SCREEN>,
 }
 
 impl<C, B, D> DisplayPartition<D>
@@ -118,22 +125,29 @@ where
 
     /// Creates a new partition.
     pub fn new(
+        id: u8,
         buffer: &mut [B],
         parent_size: Size,
         area: Rectangle,
-        draw_tracker: &'static DrawTracker,
+        flush_request_channel: &'static Channel<CriticalSectionRawMutex, u8, MAX_APPS_PER_SCREEN>,
     ) -> Result<DisplayPartition<D>, NewPartitionError> {
         let buffer_len = buffer.len();
         Self::check_partition_ok(&area, parent_size, buffer_len)?;
 
         Ok(DisplayPartition {
+            id,
             buffer: buffer.as_mut_ptr(),
             parent_size,
             buffer_len: buffer.len(),
             area,
             _display: core::marker::PhantomData,
-            draw_tracker,
+            flush_request_channel,
         })
+    }
+
+    /// Request to flush this partition.
+    pub async fn request_flush(&mut self) {
+        self.flush_request_channel.send(self.id).await;
     }
 
     /// Splits the partition into two new partitions.
@@ -148,22 +162,24 @@ where
 
         Ok((
             DisplayPartition::new(
+                self.id,
                 unsafe {
                     // SAFETY: self.buffer and self.buffer_len are initialized from slice in new
                     core::slice::from_raw_parts_mut(self.buffer, self.buffer_len)
                 },
                 self.parent_size,
                 area1,
-                self.draw_tracker,
+                self.flush_request_channel,
             )?,
             DisplayPartition::new(
+                self.id,
                 unsafe {
                     // SAFETY: self.buffer and self.buffer_len are initialized from slice in new
                     core::slice::from_raw_parts_mut(self.buffer, self.buffer_len)
                 },
                 self.parent_size,
                 area2,
-                self.draw_tracker,
+                self.flush_request_channel,
             )?,
         ))
     }
@@ -191,33 +207,21 @@ where
         Ok(())
     }
 
-    async fn draw_iter_internal<I>(
-        &mut self,
-        pixels: I,
-        update_dirty_area: bool,
-    ) -> Result<(), D::Error>
+    async fn draw_iter_internal<I>(&mut self, pixels: I) -> Result<(), D::Error>
     where
         I: ::core::iter::IntoIterator<Item = Pixel<D::Color>>,
     {
         let whole_buffer: &mut [B] =
             // Safety: we check that every index is within our owned slice
             unsafe { core::slice::from_raw_parts_mut(self.buffer, self.buffer_len) };
-        let mut has_drawn = false;
-        pixels
+        for p in pixels
             .into_iter()
             .map(|pixel| Pixel(pixel.0 + self.area.top_left, pixel.1))
             .filter(|Pixel(pos, _color)| self.contains(*pos))
-            .for_each(|p| {
-                let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
-                if self.contains(p.0) {
-                    whole_buffer[buffer_index] = D::map_to_buffer_element(p.1);
-                    has_drawn = true;
-                }
-            });
-        if has_drawn {
-            self.draw_tracker.is_dirty.store(true, Ordering::Relaxed);
-            if update_dirty_area {
-                *self.draw_tracker.dirty_area.lock().await = AreaToFlush::All;
+        {
+            let buffer_index = D::calculate_buffer_index(p.0, self.parent_size);
+            if self.contains(p.0) {
+                whole_buffer[buffer_index] = D::map_to_buffer_element(p.1);
             }
         }
         Ok(())
@@ -253,7 +257,7 @@ where
     where
         I: ::core::iter::IntoIterator<Item = Pixel<Self::Color>>,
     {
-        self.draw_iter_internal(pixels, true).await
+        self.draw_iter_internal(pixels).await
     }
 
     async fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
@@ -265,17 +269,11 @@ where
             // area outside partition, noop
             return Ok(());
         }
-        self.draw_tracker
-            .dirty_area
-            .lock()
-            .await
-            .include(&drawable_area);
         self.draw_iter_internal(
             drawable_area
                 .points()
                 .zip(colors)
                 .map(|(pos, color)| Pixel(pos, color)),
-            false,
         )
         .await
     }
@@ -283,71 +281,8 @@ where
     // Make sure to remove the offset from the Rectangle to be cleared,
     // draw_iter adds it again
     async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        *self.draw_tracker.dirty_area.lock().await = AreaToFlush::All;
-
         self.fill_solid(&(Rectangle::new(Point::new(0, 0), self.area.size)), color)
             .await
-    }
-}
-
-/// Area of the screen that has been drawn to since the last flush.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AreaToFlush {
-    /// The entire screen.
-    All,
-    /// Part of the screen.
-    Some(Rectangle),
-    /// Nothing.
-    None,
-}
-
-impl AreaToFlush {
-    /// Increase the area's size.
-    pub fn include(&mut self, other: &Rectangle) {
-        match self {
-            AreaToFlush::All => {}
-            AreaToFlush::None => *self = AreaToFlush::Some(*other),
-            AreaToFlush::Some(rect) => {
-                *self = AreaToFlush::Some(rect.envelope(other));
-            }
-        }
-    }
-}
-
-/// An object to track the [`AreaToFlush`] in a concurrent context. Provides safe methods to read
-/// and write concurrently.
-pub struct DrawTracker {
-    is_dirty: AtomicBool,
-    /// The area that has been drawn to, protected by a mutex.
-    pub dirty_area: Mutex<CriticalSectionRawMutex, AreaToFlush>,
-}
-
-impl Default for DrawTracker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl DrawTracker {
-    /// Creates a new draw tracker.
-    pub const fn new() -> Self {
-        Self {
-            is_dirty: AtomicBool::new(false),
-            dirty_area: Mutex::new(AreaToFlush::None),
-        }
-    }
-
-    /// Returns the area that has been drawn to safely.
-    pub async fn take_dirty_area(&self) -> AreaToFlush {
-        if self.is_dirty.load(Ordering::Acquire) {
-            let mut guard = self.dirty_area.lock().await;
-            let area = guard.clone();
-            *guard = AreaToFlush::None;
-            self.is_dirty.store(false, Ordering::Release);
-            area
-        } else {
-            AreaToFlush::None
-        }
     }
 }
 
@@ -360,6 +295,9 @@ mod tests {
     const WIDTH: u32 = 16;
     const HEIGHT: u32 = 8;
     const RESOLUTION: usize = (WIDTH * HEIGHT) as usize;
+    static FLUSH_REQUESTS: Channel<CriticalSectionRawMutex, u8, MAX_APPS_PER_SCREEN> =
+        Channel::new();
+
     struct FakeDisplay {
         buffer: [BinaryColor; RESOLUTION],
     }
@@ -403,23 +341,27 @@ mod tests {
         let mut display = FakeDisplay {
             buffer: [BinaryColor::Off; RESOLUTION],
         };
-        static DRAW_TRACKER: DrawTracker = DrawTracker::new();
-
         let too_small = Rectangle::new_at_origin(Size::new(7, 8));
         assert_eq!(
-            display.new_partition(too_small, &DRAW_TRACKER).unwrap_err(),
+            display
+                .new_partition(0, too_small, &FLUSH_REQUESTS)
+                .unwrap_err(),
             NewPartitionError::TooSmall
         );
 
         let too_big = Rectangle::new_at_origin(Size::new(WIDTH + 8, 8));
         assert_eq!(
-            display.new_partition(too_big, &DRAW_TRACKER).unwrap_err(),
+            display
+                .new_partition(0, too_big, &FLUSH_REQUESTS)
+                .unwrap_err(),
             NewPartitionError::OutsideParent
         );
 
         let bad_width = Rectangle::new_at_origin(Size::new(WIDTH - 1, 8));
         assert_eq!(
-            display.new_partition(bad_width, &DRAW_TRACKER).unwrap_err(),
+            display
+                .new_partition(0, bad_width, &FLUSH_REQUESTS)
+                .unwrap_err(),
             NewPartitionError::BadWidth
         );
     }
@@ -429,10 +371,9 @@ mod tests {
         let mut display = FakeDisplay {
             buffer: [BinaryColor::Off; RESOLUTION],
         };
-        static DRAW_TRACKER: DrawTracker = DrawTracker::new();
 
         let ok_area = Rectangle::new_at_origin(Size::new(WIDTH, HEIGHT));
-        let mut partition = display.new_partition(ok_area, &DRAW_TRACKER).unwrap();
+        let mut partition = display.new_partition(1, ok_area, &FLUSH_REQUESTS).unwrap();
 
         let half_size = Size::new(WIDTH / 2, HEIGHT);
         let left_area = Rectangle::new_at_origin(half_size);

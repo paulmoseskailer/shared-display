@@ -10,19 +10,17 @@ use embedded_graphics::{geometry::Size, primitives::Rectangle};
 use static_cell::StaticCell;
 
 use shared_display_core::{
-    AppEvent, AreaToFlush, DisplayPartition, DrawTracker, MAX_APPS_PER_SCREEN, NewPartitionError,
-    SharableBufferedDisplay,
+    AppEvent, DisplayPartition, MAX_APPS_PER_SCREEN, NewPartitionError, SharableBufferedDisplay,
 };
 
 const EVENT_QUEUE_SIZE: usize = MAX_APPS_PER_SCREEN;
 pub(crate) static SPAWNER: StaticCell<Spawner> = StaticCell::new();
-static DRAW_TRACKERS: [DrawTracker; MAX_APPS_PER_SCREEN] =
-    [const { DrawTracker::new() }; MAX_APPS_PER_SCREEN];
 
-/// Interval between to flushes.
-pub const FLUSH_INTERVAL: Duration = Duration::from_millis(20);
 /// Event queue for all apps to access.
 pub static EVENTS: Channel<CriticalSectionRawMutex, AppEvent, EVENT_QUEUE_SIZE> = Channel::new();
+
+/// Channel for partitions to request flushing.
+static FLUSH_REQUESTS: Channel<CriticalSectionRawMutex, u8, MAX_APPS_PER_SCREEN> = Channel::new();
 
 /// Whether to continue flushing or not.
 #[derive(PartialEq, Eq)]
@@ -38,7 +36,6 @@ pub struct SharedDisplay<D: SharableBufferedDisplay> {
     /// The actual display, locked with mutex
     pub real_display: Mutex<CriticalSectionRawMutex, D>,
     partition_areas: heapless::Vec<Rectangle, MAX_APPS_PER_SCREEN>,
-    draw_trackers: &'static [DrawTracker; MAX_APPS_PER_SCREEN],
 
     spawner: &'static Spawner,
 }
@@ -53,7 +50,6 @@ where
         SharedDisplay {
             real_display: Mutex::new(real_display),
             partition_areas: heapless::Vec::new(),
-            draw_trackers: &DRAW_TRACKERS,
             spawner: spawner_ref,
         }
     }
@@ -80,7 +76,7 @@ where
         }
 
         let index = self.partition_areas.len();
-        let result = real_display.new_partition(area, &self.draw_trackers[index]);
+        let result = real_display.new_partition(index.try_into().unwrap(), area, &FLUSH_REQUESTS);
 
         if result.is_ok() {
             self.partition_areas.push(area).unwrap();
@@ -137,27 +133,38 @@ where
     /// Provides the passed in function with a Rectangle of the area that has been drawn to since
     /// the last flush.
     /// Only exits if the flush function returns [`FlushResult::Abort`].
-    pub async fn run_flush_loop_with<F>(&self, mut flush_area_fn: F)
+    pub async fn run_flush_loop_with<F>(&self, mut flush_area_fn: F, flush_interval: Duration)
     where
         F: AsyncFnMut(&mut D, Rectangle) -> FlushResult,
     {
-        'outer: loop {
-            for (index, draw_tracker) in self.draw_trackers.iter().enumerate() {
-                let area_to_flush = match draw_tracker.take_dirty_area().await {
-                    AreaToFlush::None => continue,
-                    AreaToFlush::All => self.partition_areas[index],
-                    AreaToFlush::Some(rect) => {
-                        let offset = self.partition_areas[index].top_left;
-                        Rectangle::new(rect.top_left + offset, rect.size)
-                    }
-                };
+        'flush: loop {
+            for partition in 0..self.partition_areas.len() {
+                let area_to_flush = self.partition_areas[partition];
                 let flush_result =
                     flush_area_fn(&mut *self.real_display.lock().await, area_to_flush).await;
                 if flush_result == FlushResult::Abort {
-                    break 'outer;
+                    break 'flush;
                 }
             }
-            Timer::after(FLUSH_INTERVAL).await;
+            Timer::after(flush_interval).await;
+        }
+    }
+
+    /// Spawns a background task that waits for flush requests from all [`DisplayPartition`]s and flushes.
+    pub async fn wait_for_flush_requests<F>(&self, mut flush_area_fn: F, retry_interval: Duration)
+    where
+        F: AsyncFnMut(&mut D, Rectangle) -> FlushResult,
+    {
+        'flush: loop {
+            while let Ok(partition) = FLUSH_REQUESTS.try_receive() {
+                let area_to_flush = self.partition_areas[partition as usize];
+                let flush_result =
+                    flush_area_fn(&mut *self.real_display.lock().await, area_to_flush).await;
+                if flush_result == FlushResult::Abort {
+                    break 'flush;
+                }
+            }
+            Timer::after(Duration::from_millis(10) + retry_interval).await;
         }
     }
 }

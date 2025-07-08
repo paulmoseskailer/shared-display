@@ -10,7 +10,7 @@
 //!
 //! ```rust,no_run
 //! # use embassy_executor::Spawner;
-//! # use embassy_time::Timer;
+//! # use embassy_time::{Duration, Timer};
 //! # use embedded_graphics::{
 //! #    geometry::Size,
 //! #    mono_font::{MonoTextStyle, ascii::FONT_10X20},
@@ -106,7 +106,7 @@
 //!                 return FlushResult::Abort;
 //!             }
 //!             FlushResult::Continue
-//!         })
+//!         }, Duration::from_millis(200))
 //!         .await;
 //! }
 //! ```

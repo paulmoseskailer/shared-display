@@ -3,10 +3,10 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::{vec, vec::Vec};
 
-use crate::{FLUSH_INTERVAL, FlushResult, NewPartitionError, SPAWNER, launch_future};
+use crate::{FlushResult, NewPartitionError, SPAWNER, launch_future};
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-use embassy_time::Timer;
+use embassy_time::{Duration, Timer};
 use embedded_graphics::{
     geometry::{Point, Size},
     prelude::*,
@@ -127,13 +127,16 @@ where
     /// that has to be drawn to the actual screen. It is called once per flush, after all chunks have been
     /// decompressed.
     /// Only exits if the flush function returns [`FlushResult::Abort`].
-    pub async fn run_flush_loop_with_completion<F>(&self, mut flush_complete_fn: F)
-    where
+    pub async fn run_flush_loop_with_completion<F>(
+        &self,
+        mut flush_complete_fn: F,
+        flush_interval: Duration,
+    ) where
         F: AsyncFnMut(&mut D) -> FlushResult,
     {
         loop {
             if self.partition_areas.is_empty() {
-                Timer::after(FLUSH_INTERVAL).await;
+                Timer::after(flush_interval).await;
                 continue;
             }
 
@@ -166,7 +169,7 @@ where
                 }
             }
 
-            Timer::after(FLUSH_INTERVAL).await;
+            Timer::after(flush_interval).await;
         }
     }
 
