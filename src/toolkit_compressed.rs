@@ -153,7 +153,7 @@ where
                 self.real_display
                     .lock()
                     .await
-                    .flush_chunk(decompressed_chunk, chunk_area)
+                    .flush_chunk(&decompressed_chunk, chunk_area)
                     .await;
             }
 

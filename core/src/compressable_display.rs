@@ -21,7 +21,7 @@ pub trait CompressableDisplay: DrawTarget {
     fn calculate_buffer_index(point: Point, buffer_area_size: Size) -> usize;
 
     /// Flushes a given chunk. Called once per chunk for every flush.
-    async fn flush_chunk(&mut self, chunk: Vec<Self::BufferElement>, chunk_area: Rectangle);
+    async fn flush_chunk(&mut self, chunk: &[Self::BufferElement], chunk_area: Rectangle);
 }
 
 /// A partition of a [`CompressableDisplay`].
