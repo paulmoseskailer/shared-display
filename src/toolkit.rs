@@ -61,9 +61,9 @@ where
         let real_display: &mut D = &mut *self.real_display.lock().await;
 
         // check area inside display
-        let bb = real_display.bounding_box();
-        if !(bb.contains(area.top_left)
-            && bb.contains(area.bottom_right().unwrap_or(area.top_left)))
+        let parent_area = real_display.bounding_box();
+        if !(parent_area.contains(area.top_left)
+            && parent_area.contains(area.bottom_right().unwrap_or(area.top_left)))
         {
             return Err(NewPartitionError::OutsideParent);
         }
@@ -76,7 +76,13 @@ where
         }
 
         let index = self.partition_areas.len();
-        let result = real_display.new_partition(index.try_into().unwrap(), area, &FLUSH_REQUESTS);
+        let result = DisplayPartition::new(
+            index.try_into().unwrap(),
+            real_display.get_buffer(),
+            parent_area.size,
+            area,
+            &FLUSH_REQUESTS,
+        );
 
         if result.is_ok() {
             self.partition_areas.push(area).unwrap();

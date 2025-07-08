@@ -8,7 +8,9 @@ use embedded_graphics::{
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
 };
-use shared_display_core::{MAX_APPS_PER_SCREEN, NewPartitionError, SharableBufferedDisplay};
+use shared_display_core::{
+    DisplayPartition, MAX_APPS_PER_SCREEN, NewPartitionError, SharableBufferedDisplay,
+};
 
 const DISP_WIDTH: usize = 16;
 const DISP_HEIGHT: usize = 2;
@@ -93,10 +95,23 @@ async fn simple_split_clear() -> Result<(), NewPartitionError> {
     d.clear(BinaryColor::On).await.unwrap();
     assert_eq!(*d.flush(), [1; NUM_PIXELS]);
 
+    let parent_size = d.bounding_box().size;
     let left_area = Rectangle::new(Point::new(0, 0), Size::new(8, 2));
-    let mut left_display = d.new_partition(0, left_area, &FLUSH_REQUESTS).unwrap();
+    let mut left_display = DisplayPartition::<FakeDisplay>::new(
+        0,
+        d.get_buffer(),
+        parent_size,
+        left_area,
+        &FLUSH_REQUESTS,
+    )?;
     let right_area = Rectangle::new(Point::new(8, 0), Size::new(8, 2));
-    let mut right_display = d.new_partition(1, right_area, &FLUSH_REQUESTS).unwrap();
+    let mut right_display = DisplayPartition::<FakeDisplay>::new(
+        1,
+        d.get_buffer(),
+        parent_size,
+        right_area,
+        &FLUSH_REQUESTS,
+    )?;
 
     left_display.clear(BinaryColor::Off).await.unwrap();
     let expected = string_to_buffer(String::from("00000000 11111111 00000000 11111111"));
@@ -118,10 +133,23 @@ async fn simple_split_draw_iter() -> Result<(), NewPartitionError> {
     let mut d = FakeDisplay { buffer };
     assert_eq!(*d.flush(), [0; NUM_PIXELS]);
 
+    let parent_size = d.bounding_box().size;
     let left_area = Rectangle::new(Point::new(0, 0), Size::new(8, 2));
-    let mut left_display = d.new_partition(0, left_area, &FLUSH_REQUESTS)?;
+    let mut left_display = DisplayPartition::<FakeDisplay>::new(
+        0,
+        d.get_buffer(),
+        parent_size,
+        left_area,
+        &FLUSH_REQUESTS,
+    )?;
     let right_area = Rectangle::new(Point::new(8, 0), Size::new(8, 2));
-    let mut right_display = d.new_partition(1, right_area, &FLUSH_REQUESTS)?;
+    let mut right_display = DisplayPartition::<FakeDisplay>::new(
+        1,
+        d.get_buffer(),
+        parent_size,
+        right_area,
+        &FLUSH_REQUESTS,
+    )?;
 
     let rect = Rectangle::new(Point::new(0, 0), Size::new(2, 2));
     rect.into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
