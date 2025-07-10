@@ -1,14 +1,12 @@
 use core::cmp::PartialEq;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
 use embedded_graphics::{
     Pixel, draw_target::DrawTarget, geometry::Point, prelude::*, primitives::Rectangle,
 };
-
-// requires embedded-alloc for no_std
 extern crate alloc;
-use alloc::vec::Vec;
+use alloc::rc::Rc;
 
-use crate::{MAX_APPS_PER_SCREEN, NewPartitionError, compressed_buffer::*, flush_lock::FlushLock};
+use crate::{MAX_APPS_PER_SCREEN, NewPartitionError, compressed_buffer::*};
 
 /// A buffered [`DrawTarget`] that can be compressed and shared among multiple apps.
 pub trait CompressableDisplay: DrawTarget {
@@ -28,7 +26,8 @@ pub trait CompressableDisplay: DrawTarget {
 /// A partition of a [`CompressableDisplay`].
 pub struct CompressedDisplayPartition<D: CompressableDisplay> {
     id: u8,
-    buffer: CompressedBuffer<D::BufferElement>,
+    /// The compressed buffer that this partition controls.
+    pub buffer: Rc<Mutex<CriticalSectionRawMutex, CompressedBuffer<D::BufferElement>>>,
     /// Size of the parent display.
     pub parent_size: Size,
     /// Size of the partition itself.
@@ -60,6 +59,7 @@ where
         id: u8,
         parent_size: Size,
         area: Rectangle,
+        buffer: Rc<Mutex<CriticalSectionRawMutex, CompressedBuffer<D::BufferElement>>>,
         flush_request_channel: &'static Channel<CriticalSectionRawMutex, u8, MAX_APPS_PER_SCREEN>,
     ) -> Result<CompressedDisplayPartition<D>, NewPartitionError> {
         if area.size.width < 8 {
@@ -71,7 +71,7 @@ where
 
         Ok(CompressedDisplayPartition {
             id,
-            buffer: CompressedBuffer::new(area.size, B::default()),
+            buffer,
             parent_size,
             area,
             _display: core::marker::PhantomData,
@@ -83,11 +83,6 @@ where
     pub fn envelope(&mut self, other: &Rectangle) {
         self.area = self.area.envelope(other);
         todo!("enveloping compressed partitions not yet implemented");
-    }
-
-    /// Provide a raw pointer to the compressed buffer.
-    pub fn get_ptr_to_buffer(&self) -> *const Vec<(B, u8)> {
-        self.buffer.get_ptr_to_inner()
     }
 
     /// Request to flush this partition.
@@ -108,25 +103,23 @@ where
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        FlushLock::new()
-            .protect_write(|| {
-                let self_area = self.area;
-                let self_offset = self_area.top_left;
-                pixels
-                    .into_iter()
-                    .filter(|Pixel(pos, _color)| self_area.contains(*pos + self_offset))
-                    .for_each(|p| {
-                        let target_index = D::calculate_buffer_index(p.0, self.area.size);
-                        self.buffer
-                            .set_at_index(target_index, D::map_to_buffer_element(p.1))
-                            .unwrap();
-                    });
-                if self.buffer.check_integrity().is_err() {
-                    panic!("after draw_iter check rle failed");
-                }
-                Ok(())
-            })
-            .await
+        let self_area = self.area;
+        let self_offset = self_area.top_left;
+        for p in pixels
+            .into_iter()
+            .filter(|Pixel(pos, _color)| self_area.contains(*pos + self_offset))
+        {
+            let target_index = D::calculate_buffer_index(p.0, self.area.size);
+            self.buffer
+                .lock()
+                .await
+                .set_at_index(target_index, D::map_to_buffer_element(p.1))
+                .unwrap();
+        }
+        if self.buffer.lock().await.check_integrity().is_err() {
+            panic!("after draw_iter check rle failed");
+        }
+        Ok(())
     }
 
     async fn fill_solid(
@@ -135,23 +128,46 @@ where
         color: Self::Color,
     ) -> Result<(), Self::Error> {
         let buffer_element = D::map_to_buffer_element(color);
+        let drawable_area = self.area.intersection(&Rectangle::new(
+            area.top_left + self.area.top_left,
+            area.size,
+        ));
+        if drawable_area.is_zero_sized() {
+            return Ok(());
+        }
 
         // fill row-by-row
-        let row_starts = core::iter::repeat(area.top_left)
-            .take(area.size.height as usize)
-            .enumerate()
-            .map(|(i, p)| p + Point::new(0, i as i32));
+        let row_starts = drawable_area.rows().map(|y| Point::new(area.top_left.x, y));
         for row_start in row_starts {
             let target_index = D::calculate_buffer_index(row_start, self.area.size);
-            self.buffer
-                .set_at_index_contiguous(target_index, buffer_element, area.size.width as usize)
-                .unwrap();
+            let r = self.buffer.lock().await.set_at_index_contiguous(
+                target_index,
+                buffer_element,
+                drawable_area.size.width as usize,
+            );
+            if r.is_err() {
+                eprintln!(
+                    "failed setting target_index {} for row_start {} in partition at {}, size {}",
+                    target_index, row_start, self.area.top_left, self.area.size
+                );
+                panic!();
+            }
+        }
+        if self.buffer.lock().await.check_integrity().is_err() {
+            eprintln!("check integrity failed after fill_contiguous");
+            eprintln!(
+                "original call {:?}, partition {:?} -> drawable {:?}",
+                area, self.area, drawable_area
+            );
+            panic!();
         }
         Ok(())
     }
 
     async fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         self.buffer
+            .lock()
+            .await
             .clear_and_refill(D::map_to_buffer_element(color));
         Ok(())
     }

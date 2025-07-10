@@ -1,7 +1,7 @@
 #![allow(async_fn_in_trait)]
 extern crate alloc;
 use alloc::boxed::Box;
-use alloc::{vec, vec::Vec};
+use alloc::{rc::Rc, vec, vec::Vec};
 
 use crate::{FLUSH_REQUESTS, FlushResult, NewPartitionError, SPAWNER, launch_future};
 use embassy_executor::Spawner;
@@ -13,7 +13,7 @@ use embedded_graphics::{
     primitives::Rectangle,
 };
 use shared_display_core::{
-    CompressableDisplay, CompressedDisplayPartition, DecompressingIter, FlushLock,
+    CompressableDisplay, CompressedBuffer, CompressedDisplayPartition, DecompressingIter,
     MAX_APPS_PER_SCREEN,
 };
 
@@ -27,7 +27,10 @@ pub struct SharedCompressedDisplay<const CHUNK_HEIGHT: usize, D: CompressableDis
     pub real_display: Mutex<CriticalSectionRawMutex, D>,
     size: Size,
     partition_areas: heapless::Vec<Rectangle, MAX_APPS_PER_SCREEN>,
-    buffer_pointers: heapless::Vec<*const Vec<(D::BufferElement, u8)>, MAX_APPS_PER_SCREEN>,
+    buffer_pointers: heapless::Vec<
+        Rc<Mutex<CriticalSectionRawMutex, CompressedBuffer<D::BufferElement>>>,
+        MAX_APPS_PER_SCREEN,
+    >,
 
     spawner: &'static Spawner,
 }
@@ -89,10 +92,17 @@ where
             }
         }
         let id: u8 = self.partition_areas.len().try_into().unwrap();
-        let partition = CompressedDisplayPartition::new(id, self.size, area, &FLUSH_REQUESTS)?;
+        let buffer = Rc::new(Mutex::new(CompressedBuffer::new(area.size, B::default())));
         self.buffer_pointers
-            .push(partition.get_ptr_to_buffer())
-            .unwrap();
+            .push(buffer)
+            .unwrap_or_else(|_| panic!("failed to save new partition buffer"));
+        let partition = CompressedDisplayPartition::new(
+            id,
+            self.size,
+            area,
+            Rc::clone(&self.buffer_pointers[id as usize]),
+            &FLUSH_REQUESTS,
+        )?;
 
         self.partition_areas.push(area).unwrap();
 
@@ -148,9 +158,8 @@ where
                     Size::new(self.size.width, CHUNK_HEIGHT as u32),
                 );
 
-                let decompressed_chunk: Vec<D::BufferElement> = FlushLock::new()
-                    .protect_flush(async || self.decompress_chunk(chunk_area))
-                    .await;
+                let decompressed_chunk: Vec<D::BufferElement> =
+                    self.decompress_chunk(chunk_area).await;
                 self.real_display
                     .lock()
                     .await
@@ -158,11 +167,7 @@ where
                     .await;
             }
 
-            let flush_result = FlushLock::new()
-                .protect_flush(async || {
-                    flush_complete_fn(&mut *self.real_display.lock().await).await
-                })
-                .await;
+            let flush_result = flush_complete_fn(&mut *self.real_display.lock().await).await;
             match flush_result {
                 FlushResult::Continue => {}
                 FlushResult::Abort => {
@@ -196,9 +201,8 @@ where
                             Size::new(self.size.width, CHUNK_HEIGHT as u32),
                         );
 
-                        let decompressed_chunk: Vec<D::BufferElement> = FlushLock::new()
-                            .protect_flush(async || self.decompress_chunk(chunk_area))
-                            .await;
+                        let decompressed_chunk: Vec<D::BufferElement> =
+                            self.decompress_chunk(chunk_area).await;
                         self.real_display
                             .lock()
                             .await
@@ -206,11 +210,8 @@ where
                             .await;
                     }
 
-                    let flush_result = FlushLock::new()
-                        .protect_flush(async || {
-                            flush_complete_fn(&mut *self.real_display.lock().await).await
-                        })
-                        .await;
+                    let flush_result =
+                        flush_complete_fn(&mut *self.real_display.lock().await).await;
                     match flush_result {
                         FlushResult::Continue => {}
                         FlushResult::Abort => {
@@ -222,7 +223,7 @@ where
         }
     }
 
-    fn decompress_chunk(&self, chunk_area: Rectangle) -> Vec<D::BufferElement> {
+    async fn decompress_chunk(&self, chunk_area: Rectangle) -> Vec<D::BufferElement> {
         let resolution = chunk_area.size.width * chunk_area.size.height;
         assert_eq!(
             chunk_area.top_left.x, 0,
@@ -233,8 +234,10 @@ where
             "a chunk does not span the entire width of the screen"
         );
 
+        defmt::trace!("allocating {} buffer elements...", resolution);
         let mut decompressed_chunk: Vec<D::BufferElement> =
             vec![D::BufferElement::default(); resolution as usize];
+        defmt::trace!("... success");
         for (i, partition_area) in self.partition_areas.iter().enumerate() {
             let intersection: Rectangle = partition_area.intersection(&chunk_area);
             if intersection.size == Size::zero() {
@@ -242,7 +245,7 @@ where
             }
 
             // decompress intersection with partition
-            let compressed_partition: &Vec<(B, u8)> = unsafe { &*self.buffer_pointers[i] };
+            let compressed_partition = &self.buffer_pointers[i].lock().await;
 
             // copy decompressed intersection into chunk row by row
             let y_offset_in_chunk = (intersection.top_left.y - chunk_area.top_left.y) as usize;

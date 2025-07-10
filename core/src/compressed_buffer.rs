@@ -3,7 +3,6 @@ use embedded_graphics::prelude::*;
 
 // requires embedded-alloc for no_std
 extern crate alloc;
-use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -11,7 +10,7 @@ use alloc::vec::Vec;
 #[allow(clippy::box_collection)]
 #[derive(Clone)]
 pub struct CompressedBuffer<B: Copy + PartialEq> {
-    pub(crate) inner: Box<Vec<(B, u8)>>,
+    pub(crate) inner: Vec<(B, u8)>,
     decompressed_size: Size,
 }
 
@@ -26,14 +25,9 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
             buffer.push((start_value, remainder.try_into().unwrap()));
         }
         Self {
-            inner: Box::new(buffer),
+            inner: buffer,
             decompressed_size,
         }
-    }
-
-    /// Returns a raw pointer to the inner buffer.
-    pub fn get_ptr_to_inner(&self) -> *const Vec<(B, u8)> {
-        &*self.inner
     }
 
     /// Checks whether the buffer still encodes as many elements as it should.
@@ -163,17 +157,35 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
         new_value: B,
         mut num_elements: usize,
     ) -> Result<(), ()> {
-        let (mut run_index, mut decompressed_run_start) =
-            self.find_run_with_index(target_index).ok_or(())?;
+        let end_index = target_index + num_elements;
+        let r = self.find_run_with_index(target_index).ok_or(());
+        if r.is_err() {
+            eprintln!(
+                "have area {}x{}, did not find target_index {}",
+                self.decompressed_size.width, self.decompressed_size.height, target_index
+            );
+        }
+        let (mut run_index, mut decompressed_run_start) = r?;
         let (mut color_before, mut run_len) = self.inner[run_index];
         let next_run_start = decompressed_run_start + run_len as usize;
         let mut elements_left_in_run = next_run_start - target_index;
 
         // check if this run already has the correct color
         while color_before == new_value {
+            /*
+                        eprintln!(
+                            "skipping run {}, run_len {}, els left to set {}-{}, decompressed start {}+{}",
+                            run_index,
+                            run_len,
+                            num_elements,
+                            elements_left_in_run,
+                            decompressed_run_start,
+                            elements_left_in_run
+                        );
+            */
             run_index += 1;
-            decompressed_run_start += run_len as usize;
-            num_elements = num_elements.saturating_sub(elements_left_in_run as usize);
+            decompressed_run_start += elements_left_in_run;
+            num_elements = num_elements.saturating_sub(elements_left_in_run);
             (color_before, run_len) = self.inner[run_index];
             elements_left_in_run = run_len as usize;
 
@@ -182,9 +194,22 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
             }
         }
 
+        if decompressed_run_start > end_index {
+            eprintln!(
+                "skipped some runs, should have 0 els left to set, run {}/{}, decompresed start {}, target_index {}, end_index {}, els left {}",
+                run_index,
+                self.inner.len(),
+                decompressed_run_start,
+                target_index,
+                end_index,
+                num_elements
+            );
+            return Err(());
+        }
         // deal with found run (will end up being right before contiguous block)
-        let elements_before_target: u8 =
-            (target_index - decompressed_run_start).try_into().unwrap();
+        let elements_before_target: u8 = (target_index.saturating_sub(decompressed_run_start))
+            .try_into()
+            .map_err(|_| ())?;
         if elements_before_target > 0 {
             // shorten found run
             self.inner[run_index].1 = elements_before_target;
@@ -250,11 +275,6 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
                 .insert(run_index + 1, (new_value, remainder.try_into().unwrap()));
         }
 
-        if self.check_integrity().is_err() {
-            panic!(
-                "in set_at_index_contiguous({target_index}, {num_elements}) check_integrity failed at the end",
-            );
-        }
         Ok(())
     }
 
@@ -288,8 +308,8 @@ where
     B: Copy + PartialEq + Default,
 {
     /// Creates a new decompressing iterator from a vector of runs.
-    pub fn new(buffer: &'a Vec<(B, u8)>) -> Self {
-        let mut compressed_buffer_iter = buffer.iter();
+    pub fn new(buffer: &'a CompressedBuffer<B>) -> Self {
+        let mut compressed_buffer_iter = buffer.inner.iter();
         let current_run = compressed_buffer_iter.next().map(|&r| r);
         Self {
             current_run,
@@ -352,10 +372,7 @@ mod tests {
         buffer.check_integrity().unwrap();
 
         buffer.clear_and_refill(255);
-        assert_eq!(
-            buffer.inner,
-            Box::new(vec![(255, 255), (255, 255), (255, 2)])
-        );
+        assert_eq!(buffer.inner, vec![(255, 255), (255, 255), (255, 2)]);
     }
 
     #[test]
@@ -365,10 +382,10 @@ mod tests {
         buffer.check_integrity().unwrap();
 
         buffer.set_at_index(2, 52)?;
-        assert_eq!(buffer.inner, Box::new(vec![(30, 2), (52, 1), (30, 13)]));
+        assert_eq!(buffer.inner, vec![(30, 2), (52, 1), (30, 13)]);
 
         buffer.set_at_index(3, 52)?;
-        assert_eq!(buffer.inner, Box::new(vec![(30, 2), (52, 2), (30, 12)]));
+        assert_eq!(buffer.inner, vec![(30, 2), (52, 2), (30, 12)]);
         Ok(())
     }
 
@@ -379,10 +396,10 @@ mod tests {
         buffer.check_integrity().unwrap();
 
         buffer.set_at_index(2, 52).unwrap();
-        assert_eq!(buffer.inner, Box::new(vec![(30, 2), (52, 1), (30, 13)]));
+        assert_eq!(buffer.inner, vec![(30, 2), (52, 1), (30, 13)]);
 
         buffer.set_at_index(1, 52).unwrap();
-        assert_eq!(buffer.inner, Box::new(vec![(30, 1), (52, 2), (30, 13)]));
+        assert_eq!(buffer.inner, vec![(30, 1), (52, 2), (30, 13)]);
     }
 
     #[test]
@@ -390,19 +407,19 @@ mod tests {
         let size = Size::new(128, 2); // 256 pixels total
         let mut buffer = CompressedBuffer::<u8>::new(size, 0);
         buffer.check_integrity()?;
-        assert_eq!(buffer.inner, Box::new(vec![(0, 255), (0, 1)]));
+        assert_eq!(buffer.inner, vec![(0, 255), (0, 1)]);
 
         buffer.set_at_index(0, 27)?;
-        assert_eq!(buffer.inner, Box::new(vec![(27, 1), (0, 254), (0, 1)]));
+        assert_eq!(buffer.inner, vec![(27, 1), (0, 254), (0, 1)]);
 
         buffer.set_at_index(2, 27)?;
         assert_eq!(
             buffer.inner,
-            Box::new(vec![(27, 1), (0, 1), (27, 1), (0, 252), (0, 1)])
+            vec![(27, 1), (0, 1), (27, 1), (0, 252), (0, 1)]
         );
 
         buffer.set_at_index(1, 27)?;
-        assert_eq!(buffer.inner, Box::new(vec![(27, 3), (0, 252), (0, 1)]));
+        assert_eq!(buffer.inner, vec![(27, 3), (0, 252), (0, 1)]);
         Ok(())
     }
 
@@ -411,12 +428,12 @@ mod tests {
         let size = Size::new(257, 1);
         let mut buffer = CompressedBuffer::<u8>::new(size, 0);
         buffer.check_integrity()?;
-        assert_eq!(buffer.inner, Box::new(vec![(0, 255), (0, 2)]));
+        assert_eq!(buffer.inner, vec![(0, 255), (0, 2)]);
         buffer.set_at_index(254, 3)?;
 
-        assert_eq!(buffer.inner, Box::new(vec![(0, 254), (3, 1), (0, 2)]));
+        assert_eq!(buffer.inner, vec![(0, 254), (3, 1), (0, 2)]);
         buffer.set_at_index(254, 0)?;
-        assert_eq!(buffer.inner, Box::new(vec![(0, 255), (0, 2)]));
+        assert_eq!(buffer.inner, vec![(0, 255), (0, 2)]);
         Ok(())
     }
 
@@ -435,7 +452,7 @@ mod tests {
         buffer.set_at_index(index2, 1)?;
 
         buffer.check_integrity()?;
-        let iter = DecompressingIter::new(unsafe { &*buffer.get_ptr_to_inner() });
+        let iter = DecompressingIter::new(&buffer);
 
         // check cloned iter
         assert_eq!(iter.clone().nth(0), Some(1));
@@ -455,18 +472,15 @@ mod tests {
         let size = Size::new(128, 4); // 512 pixels total
         let mut buffer = CompressedBuffer::<u8>::new(size, 0);
         buffer.check_integrity()?;
-        assert_eq!(buffer.inner, Box::new(vec![(0, 255), (0, 255), (0, 2)]));
+        assert_eq!(buffer.inner, vec![(0, 255), (0, 255), (0, 2)]);
 
         buffer.set_at_index_contiguous(0, 27, 100)?;
 
-        assert_eq!(
-            buffer.inner,
-            Box::new(vec![(27, 100), (0, 155), (0, 255), (0, 2)])
-        );
+        assert_eq!(buffer.inner, vec![(27, 100), (0, 155), (0, 255), (0, 2)]);
 
         buffer.set_at_index_contiguous(50, 84, 462)?;
 
-        assert_eq!(buffer.inner, Box::new(vec![(27, 50), (84, 207), (84, 255)]));
+        assert_eq!(buffer.inner, vec![(27, 50), (84, 207), (84, 255)]);
         buffer.check_integrity()?;
 
         let bigger_size = Size::new(128, 8); // 1024 pixels total
@@ -475,7 +489,7 @@ mod tests {
 
         assert_eq!(
             buffer.inner,
-            Box::new(vec![(0, 255), (0, 255), (0, 255), (0, 255), (0, 4)])
+            vec![(0, 255), (0, 255), (0, 255), (0, 255), (0, 4)]
         );
 
         // set the last 550 pixels: 1024 - 550 = 474
@@ -483,7 +497,7 @@ mod tests {
 
         assert_eq!(
             buffer.inner,
-            Box::new(vec![(0, 255), (0, 219), (123, 40), (123, 255), (123, 255)])
+            vec![(0, 255), (0, 219), (123, 40), (123, 255), (123, 255)]
         );
         buffer.check_integrity()?;
 
