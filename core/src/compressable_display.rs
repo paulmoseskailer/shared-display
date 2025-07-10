@@ -1,4 +1,5 @@
 use core::cmp::PartialEq;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use embedded_graphics::{
     Pixel, draw_target::DrawTarget, geometry::Point, prelude::*, primitives::Rectangle,
 };
@@ -7,7 +8,7 @@ use embedded_graphics::{
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::{NewPartitionError, compressed_buffer::*, flush_lock::FlushLock};
+use crate::{MAX_APPS_PER_SCREEN, NewPartitionError, compressed_buffer::*, flush_lock::FlushLock};
 
 /// A buffered [`DrawTarget`] that can be compressed and shared among multiple apps.
 pub trait CompressableDisplay: DrawTarget {
@@ -26,6 +27,7 @@ pub trait CompressableDisplay: DrawTarget {
 
 /// A partition of a [`CompressableDisplay`].
 pub struct CompressedDisplayPartition<D: CompressableDisplay> {
+    id: u8,
     buffer: CompressedBuffer<D::BufferElement>,
     /// Size of the parent display.
     pub parent_size: Size,
@@ -33,6 +35,7 @@ pub struct CompressedDisplayPartition<D: CompressableDisplay> {
     pub area: Rectangle,
 
     _display: core::marker::PhantomData<D>,
+    flush_request_channel: &'static Channel<CriticalSectionRawMutex, u8, MAX_APPS_PER_SCREEN>,
 }
 
 impl<D: CompressableDisplay> ContainsPoint for CompressedDisplayPartition<D> {
@@ -54,8 +57,10 @@ where
 {
     /// Creates a new partition.
     pub fn new(
+        id: u8,
         parent_size: Size,
         area: Rectangle,
+        flush_request_channel: &'static Channel<CriticalSectionRawMutex, u8, MAX_APPS_PER_SCREEN>,
     ) -> Result<CompressedDisplayPartition<D>, NewPartitionError> {
         if area.size.width < 8 {
             return Err(NewPartitionError::TooSmall);
@@ -65,10 +70,12 @@ where
         }
 
         Ok(CompressedDisplayPartition {
+            id,
             buffer: CompressedBuffer::new(area.size, B::default()),
             parent_size,
             area,
             _display: core::marker::PhantomData,
+            flush_request_channel,
         })
     }
 
@@ -81,6 +88,11 @@ where
     /// Provide a raw pointer to the compressed buffer.
     pub fn get_ptr_to_buffer(&self) -> *const Vec<(B, u8)> {
         self.buffer.get_ptr_to_inner()
+    }
+
+    /// Request to flush this partition.
+    pub async fn request_flush(&mut self) {
+        self.flush_request_channel.send(self.id).await;
     }
 }
 
@@ -112,9 +124,9 @@ where
                 if self.buffer.check_integrity().is_err() {
                     panic!("after draw_iter check rle failed");
                 }
+                Ok(())
             })
-            .await;
-        Ok(())
+            .await
     }
 
     async fn fill_solid(

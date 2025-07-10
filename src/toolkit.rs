@@ -20,7 +20,8 @@ pub(crate) static SPAWNER: StaticCell<Spawner> = StaticCell::new();
 pub static EVENTS: Channel<CriticalSectionRawMutex, AppEvent, EVENT_QUEUE_SIZE> = Channel::new();
 
 /// Channel for partitions to request flushing.
-static FLUSH_REQUESTS: Channel<CriticalSectionRawMutex, u8, MAX_APPS_PER_SCREEN> = Channel::new();
+pub(crate) static FLUSH_REQUESTS: Channel<CriticalSectionRawMutex, u8, MAX_APPS_PER_SCREEN> =
+    Channel::new();
 
 /// Whether to continue flushing or not.
 #[derive(PartialEq, Eq)]

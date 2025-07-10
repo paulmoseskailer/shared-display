@@ -3,7 +3,7 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::{vec, vec::Vec};
 
-use crate::{FlushResult, NewPartitionError, SPAWNER, launch_future};
+use crate::{FLUSH_REQUESTS, FlushResult, NewPartitionError, SPAWNER, launch_future};
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Timer};
@@ -88,7 +88,8 @@ where
                 return Err(NewPartitionError::Overlaps);
             }
         }
-        let partition = CompressedDisplayPartition::new(self.size, area)?;
+        let id: u8 = self.partition_areas.len().try_into().unwrap();
+        let partition = CompressedDisplayPartition::new(id, self.size, area, &FLUSH_REQUESTS)?;
         self.buffer_pointers
             .push(partition.get_ptr_to_buffer())
             .unwrap();
@@ -170,6 +171,54 @@ where
             }
 
             Timer::after(flush_interval).await;
+        }
+    }
+
+    /// Spawns a background task that waits for flush requests from all [`CompressedDisplayPartition`]s and flushes.
+    pub async fn wait_for_flush_requests<F>(
+        &self,
+        mut flush_complete_fn: F,
+        retry_interval: Duration,
+    ) where
+        F: AsyncFnMut(&mut D) -> FlushResult,
+    {
+        loop {
+            match FLUSH_REQUESTS.try_receive() {
+                Err(_) => {
+                    Timer::after(retry_interval).await;
+                }
+                Ok(_) => {
+                    // cannot flush a single partition, just flush all
+                    let num_chunks = self.size.height as usize / CHUNK_HEIGHT;
+                    for chunk in 0..num_chunks {
+                        let chunk_area = Rectangle::new(
+                            Point::new(0, (chunk * CHUNK_HEIGHT) as i32),
+                            Size::new(self.size.width, CHUNK_HEIGHT as u32),
+                        );
+
+                        let decompressed_chunk: Vec<D::BufferElement> = FlushLock::new()
+                            .protect_flush(async || self.decompress_chunk(chunk_area))
+                            .await;
+                        self.real_display
+                            .lock()
+                            .await
+                            .flush_chunk(&decompressed_chunk, chunk_area)
+                            .await;
+                    }
+
+                    let flush_result = FlushLock::new()
+                        .protect_flush(async || {
+                            flush_complete_fn(&mut *self.real_display.lock().await).await
+                        })
+                        .await;
+                    match flush_result {
+                        FlushResult::Continue => {}
+                        FlushResult::Abort => {
+                            break;
+                        }
+                    }
+                }
+            }
         }
     }
 
