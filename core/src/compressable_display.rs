@@ -128,38 +128,24 @@ where
         color: Self::Color,
     ) -> Result<(), Self::Error> {
         let buffer_element = D::map_to_buffer_element(color);
-        let drawable_area = self.area.intersection(&Rectangle::new(
-            area.top_left + self.area.top_left,
-            area.size,
-        ));
-        if drawable_area.is_zero_sized() {
+        let drawable_area = Rectangle::new_at_origin(self.area.size);
+        let area = drawable_area.intersection(&area);
+        if area.is_zero_sized() {
             return Ok(());
         }
 
         // fill row-by-row
-        let row_starts = drawable_area.rows().map(|y| Point::new(area.top_left.x, y));
+        let row_starts = area.rows().map(|y| Point::new(area.top_left.x, y));
         for row_start in row_starts {
             let target_index = D::calculate_buffer_index(row_start, self.area.size);
-            let r = self.buffer.lock().await.set_at_index_contiguous(
-                target_index,
-                buffer_element,
-                drawable_area.size.width as usize,
-            );
-            if r.is_err() {
-                eprintln!(
-                    "failed setting target_index {} for row_start {} in partition at {}, size {}",
-                    target_index, row_start, self.area.top_left, self.area.size
-                );
-                panic!();
-            }
+            self.buffer
+                .lock()
+                .await
+                .set_at_index_contiguous(target_index, buffer_element, area.size.width as usize)
+                .unwrap();
         }
         if self.buffer.lock().await.check_integrity().is_err() {
-            eprintln!("check integrity failed after fill_contiguous");
-            eprintln!(
-                "original call {:?}, partition {:?} -> drawable {:?}",
-                area, self.area, drawable_area
-            );
-            panic!();
+            panic!("check integrity failed after fill_contiguous");
         }
         Ok(())
     }

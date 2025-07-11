@@ -158,31 +158,15 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
         mut num_elements: usize,
     ) -> Result<(), ()> {
         let end_index = target_index + num_elements;
-        let r = self.find_run_with_index(target_index).ok_or(());
-        if r.is_err() {
-            eprintln!(
-                "have area {}x{}, did not find target_index {}",
-                self.decompressed_size.width, self.decompressed_size.height, target_index
-            );
-        }
-        let (mut run_index, mut decompressed_run_start) = r?;
+        let (mut run_index, mut decompressed_run_start) =
+            self.find_run_with_index(target_index).ok_or(())?;
         let (mut color_before, mut run_len) = self.inner[run_index];
         let next_run_start = decompressed_run_start + run_len as usize;
         let mut elements_left_in_run = next_run_start - target_index;
 
         // check if this run already has the correct color
         while color_before == new_value {
-            /*
-                        eprintln!(
-                            "skipping run {}, run_len {}, els left to set {}-{}, decompressed start {}+{}",
-                            run_index,
-                            run_len,
-                            num_elements,
-                            elements_left_in_run,
-                            decompressed_run_start,
-                            elements_left_in_run
-                        );
-            */
+            // skip to next run
             run_index += 1;
             decompressed_run_start += elements_left_in_run;
             num_elements = num_elements.saturating_sub(elements_left_in_run);
@@ -193,19 +177,11 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
                 return Ok(());
             }
         }
+        assert!(
+            decompressed_run_start <= end_index,
+            "fill_contiguous skipped too many runs!"
+        );
 
-        if decompressed_run_start > end_index {
-            eprintln!(
-                "skipped some runs, should have 0 els left to set, run {}/{}, decompresed start {}, target_index {}, end_index {}, els left {}",
-                run_index,
-                self.inner.len(),
-                decompressed_run_start,
-                target_index,
-                end_index,
-                num_elements
-            );
-            return Err(());
-        }
         // deal with found run (will end up being right before contiguous block)
         let elements_before_target: u8 = (target_index.saturating_sub(decompressed_run_start))
             .try_into()

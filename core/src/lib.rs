@@ -9,7 +9,7 @@
 //!
 //!
 //!
-//#![no_std]
+#![no_std]
 #![warn(missing_docs)]
 #![allow(async_fn_in_trait)]
 

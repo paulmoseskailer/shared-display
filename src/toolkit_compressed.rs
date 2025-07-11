@@ -234,10 +234,8 @@ where
             "a chunk does not span the entire width of the screen"
         );
 
-        defmt::trace!("allocating {} buffer elements...", resolution);
         let mut decompressed_chunk: Vec<D::BufferElement> =
             vec![D::BufferElement::default(); resolution as usize];
-        defmt::trace!("... success");
         for (i, partition_area) in self.partition_areas.iter().enumerate() {
             let intersection: Rectangle = partition_area.intersection(&chunk_area);
             if intersection.size == Size::zero() {
