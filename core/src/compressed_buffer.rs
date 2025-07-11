@@ -3,8 +3,7 @@ use embedded_graphics::prelude::*;
 
 // requires embedded-alloc for no_std
 extern crate alloc;
-use alloc::vec;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 /// An RLE-encoded framebuffer.
 #[allow(clippy::box_collection)]
@@ -162,16 +161,16 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
             self.find_run_with_index(target_index).ok_or(())?;
         let (mut color_before, mut run_len) = self.inner[run_index];
         let next_run_start = decompressed_run_start + run_len as usize;
-        let mut elements_left_in_run = next_run_start - target_index;
+        let mut elements_left_in_run: u8 = u8::try_from(next_run_start - target_index).unwrap();
 
         // check if this run already has the correct color
         while color_before == new_value {
             // skip to next run
             run_index += 1;
-            decompressed_run_start += elements_left_in_run;
-            num_elements = num_elements.saturating_sub(elements_left_in_run);
+            decompressed_run_start += run_len as usize;
+            num_elements = num_elements.saturating_sub(elements_left_in_run as usize);
             (color_before, run_len) = self.inner[run_index];
-            elements_left_in_run = run_len as usize;
+            elements_left_in_run = run_len;
 
             if num_elements == 0 {
                 return Ok(());
@@ -179,79 +178,81 @@ impl<B: Copy + PartialEq> CompressedBuffer<B> {
         }
         assert!(
             decompressed_run_start <= end_index,
-            "fill_contiguous skipped too many runs!"
+            "set_at_index_contiguous skipped too many runs!"
         );
 
-        // deal with found run (will end up being right before contiguous block)
-        let elements_before_target: u8 = (target_index.saturating_sub(decompressed_run_start))
-            .try_into()
-            .map_err(|_| ())?;
-        if elements_before_target > 0 {
-            // shorten found run
-            self.inner[run_index].1 = elements_before_target;
-        } else {
-            // target element is first element of the run, so remove it entirely
-            self.inner.remove(run_index);
+        let insert_index = self.remove_n_elements_starting_at_run_x_index_i(
+            num_elements,
+            run_index,
+            run_len.saturating_sub(elements_left_in_run),
+        );
+        self.add_n_elements_at_run_x(num_elements, new_value, insert_index);
+        self.check_integrity()?;
+
+        Ok(())
+    }
+
+    // Removes n elements starting at the ith element of run x.
+    // Returns the index of the run in which to insert new elements in place of the removed ones.
+    fn remove_n_elements_starting_at_run_x_index_i(
+        &mut self,
+        mut elements_to_remove: usize,
+        run_index: usize,
+        inside_run_index: u8,
+    ) -> usize {
+        if elements_to_remove == 0 {
+            todo!();
         }
 
-        // where to insert new block and elements_left_in_run
-        let new_blocks_index = match elements_before_target {
-            // found run was removed, insert in its place
+        // 1. Possibly split off the beginning of run x
+        let (run_x_color, run_x_len) = self.inner[run_index];
+        assert!(inside_run_index < run_x_len);
+        if inside_run_index > 0 {
+            // split run in two
+            // left part
+            self.inner[run_index].1 = inside_run_index;
+            // right part
+            let right_split_len = run_x_len - inside_run_index;
+            self.inner
+                .insert(run_index + 1, (run_x_color, right_split_len));
+        }
+
+        // where to insert new block after the removal
+        let insert_index_afterwards = match inside_run_index {
+            // no split took place, insert/delete at run x
             0 => run_index,
-            // found run was shortened, insert right after it
+            // first run was split off, insert/delete right after
             _ => run_index + 1,
         };
 
-        // 1. Remove num_elements elements
-
-        // check if contiguous block fits inside current run
-        if num_elements < elements_left_in_run {
-            // insert the new elements (known to be less than 255)
-            self.inner.insert(
-                new_blocks_index,
-                (new_value, (num_elements).try_into().unwrap()),
-            );
-
-            // add the remaining elements after the new ones
-            self.inner.insert(
-                new_blocks_index + 1,
-                (
-                    color_before,
-                    (elements_left_in_run - num_elements).try_into().unwrap(),
-                ),
-            );
-            // everything inserted, return early.
-            return Ok(());
-        }
-
-        // new elements do not fit inside current run, remove more elements from next run(s)
-        let mut elements_to_remove = num_elements - elements_left_in_run;
+        // 2. Remove remaining elements
         while elements_to_remove > 0 {
-            let (_color, next_run_len) = self.inner[new_blocks_index];
-            if elements_to_remove >= next_run_len as usize {
-                // still need to remove elements than the next run contains, remove entire run
-                elements_to_remove -= next_run_len as usize;
-                self.inner.remove(new_blocks_index);
+            let (_color, next_run_len) = self.inner[insert_index_afterwards];
+            let keep_next_run = elements_to_remove < next_run_len as usize;
+            if keep_next_run {
+                // only shorten the run, don't remove entirely
+                self.inner[insert_index_afterwards].1 -= u8::try_from(elements_to_remove).unwrap();
             } else {
-                // need to remove less elements than contained in next run, shorten the run
-                self.inner[new_blocks_index].1 -=
-                    <usize as TryInto<u8>>::try_into(elements_to_remove).unwrap();
-                elements_to_remove = 0;
+                // need to remove at least as many elements as the run is long
+                // therefore delete the entire run
+                self.inner.remove(insert_index_afterwards);
             }
+            elements_to_remove = elements_to_remove.saturating_sub(next_run_len as usize);
         }
 
-        // 2. Insert num_elements new values
+        insert_index_afterwards
+    }
+
+    fn add_n_elements_at_run_x(&mut self, num_elements: usize, new_value: B, run_index: usize) {
         let full_runs = num_elements / 255;
         for _ in 0..full_runs {
-            self.inner.insert(run_index + 1, (new_value, 255));
+            self.inner.insert(run_index, (new_value, 255));
         }
         let remainder = num_elements - (full_runs * 255);
         if remainder > 0 {
             self.inner
-                .insert(run_index + 1, (new_value, remainder.try_into().unwrap()));
+                .insert(run_index, (new_value, remainder.try_into().unwrap()));
         }
-
-        Ok(())
     }
 
     /// Empties the buffer and refill it with a new value.
